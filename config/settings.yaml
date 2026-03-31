@@ -1,0 +1,21 @@
+api:
+  base_url: "https://api.uspto.gov/api/v1/patent"
+  # Set your API key in .env file as USPTO_API_KEY
+  page_size: 100
+  max_pages: 50  # ~5000 records
+
+data:
+  raw_dir: "data/raw"
+  processed_dir: "data/processed"
+  models_dir: "data/models"
+
+features:
+  # Days-based features are computed relative to petition filing date
+  date_features: true
+  technology_center_encoding: "onehot"
+  text_features: false  # Set true to extract basic text stats from decisions
+
+model:
+  test_size: 0.2
+  random_state: 42
+  cv_folds: 5
