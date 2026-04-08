@@ -41,6 +41,59 @@ def fetch_ipr_proceedings(
     return _flatten_proceedings(all_records)
 
 
+def fetch_ipr_decisions(
+    client: USPTOClient, max_pages: int = 50, page_size: int = 100
+) -> pd.DataFrame:
+    """Fetch all IPR decisions, paginating through results."""
+    all_records = []
+    offset = 0
+
+    for page in range(max_pages):
+        logger.info("Fetching decisions page %d (offset=%d)", page + 1, offset)
+        data = client.search_decisions(
+            query="IPR", offset=offset, limit=page_size
+        )
+
+        records = data.get("patentTrialDocumentDataBag", [])
+        if not records:
+            logger.info("No more decision records at offset %d", offset)
+            break
+
+        all_records.extend(records)
+        offset += page_size
+
+        total = data.get("count", 0)
+        if offset >= total:
+            break
+
+    logger.info("Fetched %d total decisions", len(all_records))
+    return _flatten_decisions(all_records)
+
+
+def _flatten_decisions(records: list[dict]) -> pd.DataFrame:
+    """Flatten nested decision JSON into a flat DataFrame."""
+    rows = []
+    for rec in records:
+        decision = rec.get("decisionData", {})
+        doc = rec.get("documentData", {})
+
+        row = {
+            "trial_number": rec.get("trialNumber"),
+            "decision_issue_date": decision.get("decisionIssueDate"),
+            "decision_type": decision.get("decisionTypeCategory"),
+            "trial_outcome": decision.get("trialOutcomeCategory"),
+            "statutes_and_rules": decision.get("statuteAndRuleBag"),
+            "document_name": doc.get("documentName"),
+            "document_title": doc.get("documentTitleText"),
+            "document_type": doc.get("documentTypeDescriptionText"),
+            "document_filing_date": doc.get("documentFilingDate"),
+            "filing_party": doc.get("filingPartyCategory"),
+        }
+        rows.append(row)
+
+    return pd.DataFrame(rows)
+
+
 def _flatten_proceedings(records: list[dict]) -> pd.DataFrame:
     """Flatten nested proceeding JSON into a flat DataFrame."""
     rows = []
