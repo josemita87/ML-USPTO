@@ -2,6 +2,7 @@
 
 import logging
 import time
+from typing import Any
 
 import requests
 
@@ -41,12 +42,115 @@ class USPTOClient:
         url = f"{self.base_url}/trials/{trial_number}/documents"
         return self._get(url)
 
+    def search_proceedings_post(
+        self,
+        *,
+        q: str | None = None,
+        filters: list[dict] | None = None,
+        range_filters: list[dict] | None = None,
+        fields: list[str] | None = None,
+        facets: list[str] | None = None,
+        sort: list[dict] | None = None,
+        offset: int = 0,
+        limit: int = 25,
+    ) -> dict:
+        """Search proceedings via POST with ODP Simplified Query Syntax.
+
+        Field names use dotted paths (e.g. `trialMetaData.trialTypeCode`).
+        `filters` entries: {"name": "<field>", "value": [<val>, ...]}.
+        `range_filters` entries: {"field": "<field>", "valueFrom": "...", "valueTo": "..."}.
+        """
+        url = f"{self.base_url}/trials/proceedings/search"
+        return self._post(url, self._build_body(q, filters, range_filters, fields, facets, sort, offset, limit))
+
+    def search_decisions_post(
+        self,
+        *,
+        q: str | None = None,
+        filters: list[dict] | None = None,
+        range_filters: list[dict] | None = None,
+        fields: list[str] | None = None,
+        facets: list[str] | None = None,
+        sort: list[dict] | None = None,
+        offset: int = 0,
+        limit: int = 25,
+    ) -> dict:
+        """Search decisions via POST. Supports `documentOCRText`, `statuteAndRuleBag`,
+        `issueTypeBag`, etc. when requested via `fields`."""
+        url = f"{self.base_url}/trials/decisions/search"
+        return self._post(url, self._build_body(q, filters, range_filters, fields, facets, sort, offset, limit))
+
+    def download_decisions(
+        self,
+        *,
+        q: str | None = None,
+        filters: list[dict] | None = None,
+        range_filters: list[dict] | None = None,
+        fields: list[str] | None = None,
+        sort: list[dict] | None = None,
+        offset: int = 0,
+        limit: int = 25,
+        format: str = "json",
+    ) -> bytes:
+        """Export decision search results as CSV or JSON.
+
+        The download endpoint supports a restricted field projection —
+        rich fields like `documentData.documentOCRText` are rejected.
+        For OCR text and full decision metadata use `search_decisions_post`.
+        """
+        url = f"{self.base_url}/trials/decisions/search/download"
+        body = self._build_body(q, filters, range_filters, fields, None, sort, offset, limit)
+        body["format"] = format
+        resp = self.session.post(url, json=body, timeout=120)
+        resp.raise_for_status()
+        return resp.content
+
+    @staticmethod
+    def _build_body(
+        q: str | None,
+        filters: list[dict] | None,
+        range_filters: list[dict] | None,
+        fields: list[str] | None,
+        facets: list[str] | None,
+        sort: list[dict] | None,
+        offset: int,
+        limit: int,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {"pagination": {"offset": offset, "limit": limit}}
+        if q is not None:
+            body["q"] = q
+        if filters:
+            body["filters"] = filters
+        if range_filters:
+            body["rangeFilters"] = range_filters
+        if fields:
+            body["fields"] = fields
+        if facets:
+            body["facets"] = facets
+        if sort:
+            body["sort"] = sort
+        return body
+
     def _get(self, url: str, params: dict | None = None) -> dict:
         for attempt in range(3):
             resp = self.session.get(url, params=params, timeout=30)
             if resp.status_code == 429:
-                wait = 2 ** (attempt + 1)
-                logger.warning("Rate limited, waiting %ds", wait)
+                # ODP requires min 5s delay on 429; back off 5s, 10s, 20s.
+                wait = 5 * (2 ** attempt)
+                logger.warning("Rate limited (429), waiting %ds", wait)
+                time.sleep(wait)
+                continue
+            resp.raise_for_status()
+            return resp.json()
+        raise RuntimeError(f"Failed after 3 retries: {url}")
+
+    def _post(self, url: str, body: dict) -> dict:
+        for attempt in range(3):
+            resp = self.session.post(url, json=body, timeout=60)
+            if resp.status_code == 429:
+                # ODP requires min 5s delay on 429; back off 5s, 10s, 20s.
+                wait = 5 * (2 ** attempt)
+                logger.warning("Rate limited (429), waiting %ds", wait)
                 time.sleep(wait)
                 continue
             resp.raise_for_status()
