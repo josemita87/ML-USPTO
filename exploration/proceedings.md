@@ -2,6 +2,13 @@
 
 Data fetched from the USPTO PTAB API. Each row represents a single PTAB proceeding (e.g., IPR, PGR, CBM).
 
+This file documents only the **proceedings** endpoint (`/trials/proceedings/search`), which provides trial metadata and is the source of the target variable (`trial_status` / `trial_outcome`). Two other endpoints are also wired up and feed the feature pipeline:
+
+- **Decisions** (`/trials/decisions/search`) — outcome categories, decision types, statutes cited, document metadata. Fetched via `fetch_ipr_decisions()`.
+- **Documents** (`/trials/{trialNumber}/documents`) — per-trial filings (petition, preliminary response, institution decision, FWD, etc.). Fetched via `get_trial_documents()`.
+
+Bulk CSV/JSON download endpoints are the preferred path for full-dataset feature extraction; the per-record API calls are used for targeted exploration.
+
 ## Columns
 
 ### Identifiers

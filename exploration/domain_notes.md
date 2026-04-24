@@ -1,10 +1,12 @@
-# Domain Notes — IPR Institution Prediction
+# Domain Notes — IPR Outcome Prediction
 
 Insights gathered from conversations with a practicing patent attorney (partner at a major IP firm, ~10 years experience in PTAB proceedings).
 
 ## Target Variable
 
-**Institution grant vs. denial** — the gatekeeper decision in IPR proceedings. If institution is denied, the petitioner has no recourse through this venue. Discretionary denial is procedural, not merits-based — you must pass this hurdle before reaching patentability analysis.
+**IPR trial outcome — exclusively.** What happens at the end of the trial (claims upheld, claims cancelled, settled, etc.), derived from the `trial_status` / `trial_outcome` fields on the proceedings record. Class definition (binary vs. multi-class, treatment of settlements and terminations) is still to be decided.
+
+The institution decision is **not** a prediction target — this is a deliberate shift from the original framing. Institution-stage signals (Fintiv, 325(d), Sotera) remain central, but as *features* that help predict the downstream outcome. A petition that fails institution is effectively a "claims survive" outcome for the patent owner, so the institution gate is absorbed into the trial-outcome label.
 
 ## High-Signal Features
 
