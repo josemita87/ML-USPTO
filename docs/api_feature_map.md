@@ -4,6 +4,11 @@ A first-pass cross-reference between the USPTO PTAB endpoints we have wired up a
 
 Client code: `src/data/client.py`. Normalized schemas: `exploration/proceedings.md`.
 
+**Authoritative API references**:
+- Swagger UI / OpenAPI spec: <https://data.uspto.gov/swagger/index.html> — endpoint paths, request parameters, response body schemas.
+- Query syntax reference: `ODP-API-Query-Spec.pdf` (in this directory).
+- Empirical-probing note: per `feedback_empirical_over_spec` memory, prefer hitting endpoints with the live client to confirm real response shape before coding to the spec — Swagger examples include synthetic placeholder data.
+
 ---
 
 ## 1. Endpoints available
@@ -12,13 +17,50 @@ Client code: `src/data/client.py`. Normalized schemas: `exploration/proceedings.
 |---|---|---|---|
 | `GET /trials/proceedings/search` | `search_proceedings()` | Paginated list of proceedings (trial metadata) | Simple keyword search |
 | `POST /trials/proceedings/search` | `search_proceedings_post()` | Same as GET but accepts structured `filters`, `rangeFilters`, `fields`, `facets`, `sort` | **Primary ingestion path** — target-variable source, surgical date/type slicing, facet exploration |
-| `GET /trials/proceedings/{trial_number}` | `get_proceeding()` | Single proceeding's full record | Detailed per-case metadata lookup |
+| `GET /trials/proceedings/search/download` | *(not wrapped)* | CSV or JSON file attachment of proceeding-level metadata (one row per case) | Bulk metadata export when you want all ~19K proceedings as a single file instead of paginating `/search`. **Empirically returns 403 'Forbidden' under load** while `/search` and path-style endpoints continue to work — see download-bucket caveat below. |
+| `GET /trials/proceedings/{trial_number}` | `get_proceeding()` | Single proceeding's full record. Includes `trialMetaData.fileDownloadURI` → **whole-case ZIP of every filing's PDF**. | Detailed per-case metadata lookup; also the entry point for whole-docket bulk pulls. |
 | `GET /trials/decisions/search` | `search_decisions()` | Paginated list of decisions | Simple keyword search |
 | `POST /trials/decisions/search` | `search_decisions_post()` | Structured decision metadata + a **500-char OCR preview** (`documentData.documentOCRText`). Full decision text is **not** returned. | **Primary path for structured decision signals** — `decisionData.statuteAndRuleBag`, `issueTypeBag`, `trialOutcomeCategory`, `appealOutcomeCategory`. For full text (Fintiv factor ratings, dispositive factor) you must fetch the decision PDF via `fileDownloadURI`. |
 | `POST /trials/decisions/search/download` | `download_decisions()` | CSV or JSON file attachment of decision metadata | Fast tabular export; **restricted field projection** — rejects `documentOCRText`, `fileDownloadURI`, `appealOutcomeCategory` |
 | `GET /trials/{trial_number}/documents` | `get_trial_documents()` | Full filing list for a trial (petition, POPR, institution decision, briefs, FWD, …) | Per-trial document index — still needed for petition / POPR text (which is *not* in the decisions endpoint response) |
+| `GET /trials/documents/search/download` | *(not wrapped, inferred — not yet probed)* | Cross-trial filing-level metadata as CSV/JSON. One row per filing with `documentTypeName`, `documentFilingDate`, `fileDownloadURI`. | Bulk filing-index for "find all institution decisions / all petitions across the whole corpus" without per-trial calls. **Schema not yet empirically verified.** |
+| `GET <trialMetaData.fileDownloadURI>` | *(not wrapped)* | Whole-case ZIP of every filing's PDF. Probed on IPR2026-00339: 33 PDFs / 202 MB. | Per-proceeding bulk PDF pull. Use targeted single-PDF fetches (via `documentData.fileDownloadURI`) over this when you only need decision PDFs — naive whole-case zips × 18K cases ≈ multi-TB. |
 
 All `/trials/*` calls above fall in the **metadata retrieval bucket** (5M calls/week combined, serial-only, burst=1). See `rate_limits.md` for full constraints.
+
+> ⚠ **`/search/download` endpoints sit in a stricter bucket than `/search`.** Empirically observed 2026-04-25: same key, same IP, same minute — `/proceedings/search/download?q=IPR2026-00339` returned `{"message":"Forbidden"}` (HTTP 403, AWS API Gateway-style body) while `/proceedings/search` and `/proceedings/{trial_number}` returned 200 fine. Swagger UI calls also kept working. Hypothesis: download endpoints are gated by a separate WAF/quota rule (possibly on caller fingerprint — Swagger sends `Origin: data.uspto.gov`). For ingestion at scale, prefer the paginated POST `/search` route over `/search/download` until this is diagnosed; or front the call with `Origin`/`Referer`/browser-`User-Agent` headers.
+
+### The three-level data model
+
+PTAB data is structured as a one-to-many hierarchy. Every download endpoint exports metadata at one of these levels — choosing the right one is about granularity, not filtering:
+
+```
+Proceeding (a trial / case)              ~19K records      → /proceedings/search[/download]
+   └── Documents (filings within a case) ~millions         → /documents/search/download, /trials/{n}/documents
+          └── PDF bytes                  the actual files  → fetch <fileDownloadURI>
+```
+
+**Same trial number filter, three different return shapes:**
+
+| Call | Rows for IPR2026-00339 | Each row represents |
+|---|---:|---|
+| `/proceedings/search/download?q=IPR2026-00339` | 1 | the case (header) |
+| `/documents/search/download?q=IPR2026-00339` *(inferred)* | ~33 | one filing in the case |
+| `/decisions/search/download?q=IPR2026-00339` | 0–N | one decision-type filing |
+| `GET <trialMetaData.fileDownloadURI>` | (binary) | every PDF in the case, zipped |
+
+Filtering changes *how many* rows match; granularity determines *what each row is*. The endpoints are **complementary tables joined on `trialNumber`**, not interchangeable views — pick by what each row should mean.
+
+### Two distinct `fileDownloadURI` fields
+
+The same field name appears at two granularities and means different things — easy to confuse:
+
+| Source | What it points to | Size |
+|---|---|---|
+| `trialMetaData.fileDownloadURI` (on a proceeding record) | **Whole-case ZIP** of every filing's PDF | ~50–500 MB per case (probed: 202 MB / 33 PDFs for IPR2026-00339) |
+| `documentData.fileDownloadURI` (on a document or decision record) | **Single PDF** of one specific filing | ~0.5–25 MB per file |
+
+Both are direct downloads via the authenticated session (`X-API-Key`). Reuse `client.session.get(uri)` rather than building a fresh request. The whole-case zip is *not* what `/search/download` returns — that endpoint exports search-result metadata as a CSV/JSON file and contains zero PDF content.
 
 > ⚠ **`documentOCRText` is a 500-char preview, not the full text.** Confirmed empirically 2026-04-24: every endpoint that returns `documentOCRText` (decisions search, documents endpoint, per-document detail endpoints) caps it at 500 characters — enough for the case caption and judge names, nothing substantive. For full decision text you must fetch the PDF via `documentData.fileDownloadURI`. This is a global API behavior, not a `fields`-projection artifact.
 
