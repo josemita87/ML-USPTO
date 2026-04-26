@@ -1,4 +1,12 @@
-"""Feature engineering for IPR institution prediction."""
+"""Feature engineering for IPR cancellation prediction (binary target).
+
+Every transform here must be observable at T₀ (`petition_filing_date`) per
+`docs/scope/prediction_scope.md` §4. Features that aggregate over other
+trials' outcomes (e.g., per-tech-center base rates) require a strict
+temporal cutoff and are therefore omitted from this baseline — a tree model
+recovers per-category rates from the one-hot dummies on its own at the
+cardinality of `technology_center`.
+"""
 
 import logging
 
@@ -51,13 +59,6 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
             .astype(str)
             .str[:3]
             .apply(pd.to_numeric, errors="coerce")
-        )
-
-    # --- Historical institution rate by technology center ---
-    if "technology_center" in df.columns and "instituted" in df.columns:
-        tc_rate = df.groupby("technology_center")["instituted"].mean()
-        features["tc_institution_rate"] = (
-            df["technology_center"].map(tc_rate).astype(float)
         )
 
     # Fill NaNs

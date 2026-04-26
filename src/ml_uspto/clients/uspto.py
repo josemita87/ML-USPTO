@@ -6,7 +6,7 @@ from typing import Any
 
 import requests
 
-from src.settings import get_settings
+from ml_uspto.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,8 @@ class USPTOClient:
         `range_filters` entries: {"field": "<field>", "valueFrom": "...", "valueTo": "..."}.
         """
         url = f"{self.base_url}/trials/proceedings/search"
-        return self._post(url, self._build_body(q, filters, range_filters, fields, facets, sort, offset, limit))
+        body = self._build_body(q, filters, range_filters, fields, facets, sort, offset, limit)
+        return self._post(url, body)
 
     def search_decisions_post(
         self,
@@ -78,7 +79,8 @@ class USPTOClient:
         """Search decisions via POST. Supports `documentOCRText`, `statuteAndRuleBag`,
         `issueTypeBag`, etc. when requested via `fields`."""
         url = f"{self.base_url}/trials/decisions/search"
-        return self._post(url, self._build_body(q, filters, range_filters, fields, facets, sort, offset, limit))
+        body = self._build_body(q, filters, range_filters, fields, facets, sort, offset, limit)
+        return self._post(url, body)
 
     def download_decisions(
         self,

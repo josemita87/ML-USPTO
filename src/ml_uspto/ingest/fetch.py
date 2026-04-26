@@ -4,7 +4,7 @@ import logging
 
 import pandas as pd
 
-from src.data.client import USPTOClient
+from ml_uspto.clients.uspto import USPTOClient
 
 logger = logging.getLogger(__name__)
 

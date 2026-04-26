@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 .credentials.env
+.DS_Store
 data/raw/
 data/processed/
 data/models/
@@ -9,3 +10,17 @@ dist/
 build/
 .venv/
 venv/
+
+# CDK
+cdk.out/
+
+# MLflow
+mlruns/
+
+# Test/cache
+.pytest_cache/
+.ruff_cache/
+
+# Stray local artifacts (one-off downloads at repo root)
+*.zip
+/IPR*.json

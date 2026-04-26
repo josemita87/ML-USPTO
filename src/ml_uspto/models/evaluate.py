@@ -33,7 +33,12 @@ def evaluate_model(
         "classification_report": classification_report(y_test, y_pred, output_dict=True),
     }
 
-    logger.info("%s — Accuracy: %.4f, AUC: %.4f", model_name, metrics["accuracy"], metrics["roc_auc"])
+    logger.info(
+        "%s — Accuracy: %.4f, AUC: %.4f",
+        model_name,
+        metrics["accuracy"],
+        metrics["roc_auc"],
+    )
     return metrics
 
 
@@ -66,8 +71,16 @@ def plot_confusion_matrix(
     y_pred = model.predict(X_test)
     cm = confusion_matrix(y_test, y_pred)
 
+    labels = ["Denied", "Instituted"]
     plt.figure(figsize=(6, 5))
-    sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", xticklabels=["Denied", "Instituted"], yticklabels=["Denied", "Instituted"])
+    sns.heatmap(
+        cm,
+        annot=True,
+        fmt="d",
+        cmap="Blues",
+        xticklabels=labels,
+        yticklabels=labels,
+    )
     plt.xlabel("Predicted")
     plt.ylabel("Actual")
     plt.title(f"Confusion Matrix — {model_name}")

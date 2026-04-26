@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.settings import PROJECT_ROOT
+from ml_uspto.settings import PROJECT_ROOT
 
 
 def save_parquet(df: pd.DataFrame, path: Path) -> None:
