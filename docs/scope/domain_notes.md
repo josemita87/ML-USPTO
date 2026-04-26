@@ -2,23 +2,27 @@
 
 Insights gathered from conversations with a practicing patent attorney (partner at a major IP firm, ~10 years experience in PTAB proceedings).
 
+> **Scope reconciliation.** This doc captures the legal-domain *why* behind features. The authoritative *what / when / what's allowed* lives in `prediction_scope.md`. The class definition is now fixed as **binary** (FWD-all-claims-unpatentable = 1, everything else = 0; settled = 0; pending = excluded — see scope §3). Several features described below as "extractable from petition / preliminary response" are **petition-only** under the scope's leakage rule (§4) — POPRs are filed ~3 months after T₀ and excluded.
+
 ## Target Variable
 
-**IPR trial outcome — exclusively.** What happens at the end of the trial (claims upheld, claims cancelled, settled, etc.), derived from the `trial_status` / `trial_outcome` fields on the proceedings record. Class definition (binary vs. multi-class, treatment of settlements and terminations) is still to be decided.
+**IPR trial outcome — exclusively.** Binary classification: did the terminating Final Written Decision hold all challenged claims unpatentable? See `prediction_scope.md` §3 for full label coding.
 
 The institution decision is **not** a prediction target — this is a deliberate shift from the original framing. Institution-stage signals (Fintiv, 325(d), Sotera) remain central, but as *features* that help predict the downstream outcome. A petition that fails institution is effectively a "claims survive" outcome for the patent owner, so the institution gate is absorbed into the trial-outcome label.
 
 ## High-Signal Features
 
-### Binary Flags (extractable from petition / preliminary response)
+### Binary Flags (extractable from petition only — POPR is post-T₀)
 
-| Feature | Description |
-|---------|-------------|
-| Fintiv addressed | Whether the decision addresses the six Fintiv factors (not all do) |
-| 325(d) addressed | Whether the same prior art was already considered during original prosecution |
-| Sotera stipulation | Whether the petitioner filed a stipulation differentiating defenses between district court and PTAB. Harder to automate — may require cross-referencing district court data (e.g., Docket Navigator) |
+| Feature | Description | Scope status |
+|---------|-------------|---|
+| Fintiv addressed | Whether the petition's §IV walks the six Fintiv factors | **In scope.** Petition §IV header detection. |
+| 325(d) addressed | Whether the petition discusses prior-PTO-consideration of the asserted art | **In scope.** Regex on `§ 325(d)` in petition. |
+| Sotera stipulation | Whether the petitioner committed not to raise the same invalidity arguments in district court | **In scope.** Extractable from petition §IV.4 (corrects earlier "external data needed" framing — see `ptab_scope_and_terminology.md` §5). |
 
 ### Fintiv Sub-Factors (6 factors, ordinal scale)
+
+> **Scope note.** Judge-issued ratings live in the Institution Decision (post-T₀, excluded as a feature per scope §4). What we extract is the petitioner's **own framing of the six factors in petition §IV** — advocacy, not adjudication. See `ptab_scope_and_terminology.md` §5 for the full lifecycle and the six-factor extraction targets.
 
 Judges rate each factor using consistent, predictable phrasing:
 1. "heavily favors" institution
@@ -27,9 +31,7 @@ Judges rate each factor using consistent, predictable phrasing:
 4. "weighs against" institution
 5. "heavily weighs against" institution
 
-Decision documents have **explicit headings** per factor ("factor one", "factor two", etc.), making extraction straightforward via term search or LLM classification.
-
-Named factors include: grant of stay, trial date proximity, parallel proceedings, expert reliance, prior adjudication, and others tracked in practitioner spreadsheets.
+Decision documents have **explicit headings** per factor ("factor one", "factor two", etc.), making extraction straightforward via term search or LLM classification — useful for **ground-truth Fintiv labels in evaluation**, not as features.
 
 The key practitioner question: **which factor is dispositive** — i.e., which one actually drives the outcome in a given case.
 
@@ -100,8 +102,8 @@ Each IPR petition generates ~$40-50K in filing fees that the USPTO retains regar
 
 ## Data Notes
 
-- Only a subset of institution decisions address Fintiv — many do not and should be filtered
-- Practitioner has an annotated spreadsheet with labeled Fintiv sub-factors — potential training/validation data
-- For discretionary denial classification, the institution decision alone is sufficient
-- For broader analysis (substantive, prior art strength), the full record is needed
-- Cross-referencing with district court data (Docket Navigator) needed for some features (Sotera stipulation, case status) — this data is NOT in the PTAB API
+- Only a subset of institution decisions address Fintiv — many do not and should be filtered (relevant only for label-evaluation use, not as a feature input).
+- Practitioner has an annotated spreadsheet with labeled Fintiv sub-factors — potential **evaluation data** under the current scope, not training input.
+- For discretionary denial classification, the institution decision alone is sufficient — but it's post-T₀ and excluded from features.
+- Sotera stipulation: extractable from petition §IV.4 directly. Earlier framing assumed cross-referencing with district-court data (Docket Navigator) was needed; this is no longer required for our scope.
+- District-court features beyond what petition §IV restates (e.g., judge docket congestion) remain genuinely external and out of scope for v1.

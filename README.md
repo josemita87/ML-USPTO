@@ -2,7 +2,7 @@
 
 Predicting **IPR (Inter Partes Review)** outcomes at the USPTO Patent Trial and Appeal Board (PTAB), using the PTAB API and guidance from a practicing patent attorney.
 
-This README is the running glossary and high-level map of the domain. Deeper notes live in [`exploration/domain_notes.md`](exploration/domain_notes.md).
+This README is the running glossary and high-level map of the domain. Deeper notes live in [`docs/scope/domain_notes.md`](docs/scope/domain_notes.md).
 
 ---
 
@@ -124,7 +124,7 @@ In rough priority order for feature engineering:
 5. **Document-structural** — discretionary-denial section length, prior-art count
 6. **Dispositive factor** — which Fintiv factor drove the outcome
 
-Extraction notes live in `exploration/domain_notes.md`.
+Extraction notes live in `docs/scope/domain_notes.md`.
 
 ---
 
@@ -140,6 +140,6 @@ Extraction notes live in `exploration/domain_notes.md`.
 ## 8. Related Files
 
 - [`docs/`](docs/) — technical documentation (start here for API ↔ feature mapping)
-- [`exploration/domain_notes.md`](exploration/domain_notes.md) — full domain notes from practitioner calls
-- [`exploration/proceedings.md`](exploration/proceedings.md) — PTAB API proceedings-schema notes
+- [`docs/scope/domain_notes.md`](docs/scope/domain_notes.md) — full domain notes from practitioner calls
+- [`docs/api/proceedings.md`](docs/api/proceedings.md) — PTAB API proceedings-schema notes
 - `src/exploration.py` — exploratory code

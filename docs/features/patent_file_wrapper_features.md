@@ -58,10 +58,10 @@ Only worth the ingestion cost if substantive claim features become a modeling pr
 
 ## 4. Relationship to other docs
 
-- `api_feature_map.md` — PTAB-side endpoints and features (our primary pipeline).
-- `ptab_scope_and_terminology.md` — what counts as in-scope PTAB data.
-- `bulk_datasets.md` — bulk-download catalog for ingesting these features at training-set scale.
-- `rate_limits.md` — quota buckets and concurrency limits (file-wrapper metadata is 5M/wk; PDF document fetches likely 1.2M/wk).
-- `exploration/domain_notes.md` — why specific features matter, per the domain expert.
+- `../api/api_feature_map.md` — PTAB-side endpoints and features (our primary pipeline).
+- `../scope/ptab_scope_and_terminology.md` — what counts as in-scope PTAB data.
+- `../api/bulk_datasets.md` — bulk-download catalog for ingesting these features at training-set scale.
+- `../api/rate_limits.md` — quota buckets and concurrency limits (file-wrapper metadata is 5M/wk; PDF document fetches likely 1.2M/wk).
+- `../scope/domain_notes.md` — why specific features matter, per the domain expert.
 
 This document covers the **patent-prosecution-side enrichment layer only**.

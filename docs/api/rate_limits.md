@@ -44,17 +44,9 @@ These apply to **every** request regardless of bucket:
 
 ### Implication for PTAB ingestion
 
-Serial-only. At ~10 req/sec sequential:
+Serial-only. At ~10 req/sec sequential, the binding constraint is **wall-clock time from burst=1 serialization, not quota**.
 
-| Pass | Calls | Bucket | Wall time |
-|---|---:|---|---|
-| Proceedings (all ~19.2K, `limit=100` assumed) | ~200 | Metadata (5M/wk) | ~20 s |
-| Decisions (structured fields + 500-char preview) | ~200 | Metadata (5M/wk) | ~30–60 s |
-| Per-trial document indices | ~19.2K | Metadata (5M/wk) | **~30 min** |
-| Decision PDFs (institution + FWD, ~25K files — needed for Fintiv / dispositive factor) | ~25K | File Wrapper Documents (1.2M/wk) | **~40 min** + 5–15 GB storage |
-| Petition PDFs (selective, for Priority-5 document-structural features) | variable, up to ~18K | File Wrapper Documents (1.2M/wk) | ~30 min + tens of GB |
-
-Core modelling pass (all but petition PDFs): **~70–80 min wall-clock, under 100K total API calls, well under all weekly quotas**. Binding constraint is wall-clock time from burst=1 serialization, not quota.
+For the canonical cost model under the current scope, see **`../scope/prediction_scope.md` §5.4**. Summary: total live-API wall-clock ≈ 60 min; petition PDFs are now the only PDFs we fetch (~4–5 GB), and decision PDFs have been cut as a feature source per `../scope/prediction_scope.md` §5.1. Earlier tables in this doc estimated ~25K decision PDF fetches; that pass no longer runs.
 
 ---
 

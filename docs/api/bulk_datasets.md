@@ -23,9 +23,9 @@ However, the gap is smaller than a "no bulk = manual per-record fetches" framing
 - **`POST /trials/proceedings/search`** and **`POST /trials/decisions/search`** accept the ODP Simplified Query Syntax body (`filters`, `rangeFilters`, `fields`, `facets`, `sort`, `pagination`). Surgical server-side filtering + field trimming makes paginated API ingestion practical at the scale of the full PTAB docket (~19K proceedings, ~20K decisions). Structured decision fields (`statuteAndRuleBag`, `issueTypeBag`, `trialOutcomeCategory`, `appealOutcomeCategory`) come back for free — these cover 325(d), substantive grounds, and outcome labels without text parsing.
 - **`POST /trials/decisions/search/download`** exports the same result set as CSV or JSON (file attachment). Field projection is restricted — it does **not** support `documentData.documentOCRText` or `decisionData.appealOutcomeCategory`. Use it for tabular metadata exports, not rich text.
 
-**Caveat on decision text:** the `documentOCRText` field returned by the decisions endpoint is capped at 500 characters — a case-caption preview, not the full decision. For Fintiv factor ratings, dispositive factor, or any full-text feature, you must still fetch the decision PDF via `documentData.fileDownloadURI` and OCR/parse it locally. See `api_feature_map.md` for details.
+**Caveat on decision text:** the `documentOCRText` field returned by the decisions endpoint is capped at 500 characters — a case-caption preview, not the full decision. Full decision text would require fetching the PDF via `documentData.fileDownloadURI`, but **decision PDFs are out of scope as a feature source** under `../scope/prediction_scope.md` §5.1; they remain accessible for label-evaluation only.
 
-**Implication:** trial-side data comes from the live `/trials/*` API, not bulk zips. Structured metadata + statutes + grounds come from API calls (in the metadata bucket, 5M/wk); full decision text still needs ~25K PDF fetches (in the Patent File Wrapper Documents bucket, 1.2M/wk). Bulk downloads remain useful for the patent-owner-side enrichment layer described in `patent_file_wrapper_features.md`.
+**Implication:** trial-side data comes from the live `/trials/*` API, not bulk zips. The only PDFs we fetch are petition PDFs (~18K, ~4–5 GB total — `../scope/prediction_scope.md` §5.4). Bulk downloads remain useful for the patent-owner-side enrichment layer described in `../features/patent_file_wrapper_features.md`.
 
 ---
 
@@ -50,7 +50,7 @@ However, the gap is smaller than a "no bulk = manual per-record fetches" framing
 
 | Product ID | Title | Frequency | Size | Use |
 |---|---|---|---|---|
-| `PTLITIG` | Patent Litigation Docket Report Data Files | Yearly | 5 GB | Potential source for the **Sotera stipulation** / parallel-litigation signal flagged as a gap in `exploration/domain_notes.md`. May partially replace Docket Navigator dependency — probe contents before relying. |
+| `PTLITIG` | Patent Litigation Docket Report Data Files | Yearly | 5 GB | Potential source for the **Sotera stipulation** / parallel-litigation signal flagged as a gap in `../scope/domain_notes.md`. May partially replace Docket Navigator dependency — probe contents before relying. |
 
 ### Patent text (optional, for substantive claim/spec features)
 
@@ -103,6 +103,6 @@ Defer `OACT`, `ECOPAIR`, `PTGRXML`, `APPXML` unless the first pass proves insuff
 ## 6. Relationship to other docs
 
 - `api_feature_map.md` — PTAB-side endpoints and features, including the POST Simplified Query Syntax that makes API ingestion viable at scale.
-- `patent_file_wrapper_features.md` — which patent-owner-side fields are worth extracting (the "what"); this doc covers the "how at scale."
-- `ptab_scope_and_terminology.md` — in-scope PTAB trial types.
+- `../features/patent_file_wrapper_features.md` — which patent-owner-side fields are worth extracting (the "what"); this doc covers the "how at scale."
+- `../scope/ptab_scope_and_terminology.md` — in-scope PTAB trial types.
 - `ODP-API-Query-Spec.pdf` — full reference for the Simplified Query Syntax used by POST endpoints.

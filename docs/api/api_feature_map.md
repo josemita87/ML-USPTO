@@ -1,8 +1,10 @@
 # API ↔ Feature Map
 
-A first-pass cross-reference between the USPTO PTAB endpoints we have wired up and the feature families we care about for trial-outcome prediction. Use this as a quick map when designing feature extraction: *for feature X, which endpoint do I hit?*
+A cross-reference between the USPTO PTAB endpoints and the feature families we care about. Use this as a quick map when designing extraction: *for feature X, which endpoint do I hit?*
 
-Client code: `src/data/client.py`. Normalized schemas: `exploration/proceedings.md`.
+> **Scope note.** Feature inclusion is governed by `../scope/prediction_scope.md` §4 (the T₀ leakage rule) and §8 (modeling assumptions, especially the petition-only PDF policy). This doc is authoritative on *which endpoint returns what*; `../scope/prediction_scope.md` is authoritative on *what we're allowed to use*. Where the two appear to disagree, scope wins.
+
+Client code: `src/data/client.py`. Normalized schemas: `proceedings.md`.
 
 **Authoritative API references**:
 - Swagger UI / OpenAPI spec: <https://data.uspto.gov/swagger/index.html> — endpoint paths, request parameters, response body schemas.
@@ -34,10 +36,19 @@ All `/trials/*` calls above fall in the **metadata retrieval bucket** (5M calls/
 
 PTAB data is structured as a one-to-many hierarchy. Every download endpoint exports metadata at one of these levels — choosing the right one is about granularity, not filtering:
 
-```
-Proceeding (a trial / case)              ~19K records      → /proceedings/search[/download]
-   └── Documents (filings within a case) ~millions         → /documents/search/download, /trials/{n}/documents
-          └── PDF bytes                  the actual files  → fetch <fileDownloadURI>
+```mermaid
+flowchart TB
+    P[Proceeding<br/>~19K records<br/>1 row per trial/case]
+    D[Documents<br/>~millions<br/>1 row per filing]
+    PDF[PDF bytes<br/>the actual files]
+    P --> D
+    D --> PDF
+    P -. /proceedings/search[/download] .- A1[ ]
+    D -. /documents/search/download<br/>/trials/{n}/documents .- A2[ ]
+    PDF -. fetch &lt;fileDownloadURI&gt; .- A3[ ]
+    style A1 fill:none,stroke:none
+    style A2 fill:none,stroke:none
+    style A3 fill:none,stroke:none
 ```
 
 **Same trial number filter, three different return shapes:**
@@ -64,7 +75,7 @@ Both are direct downloads via the authenticated session (`X-API-Key`). Reuse `cl
 
 > ⚠ **`documentOCRText` is a 500-char preview, not the full text.** Confirmed empirically 2026-04-24: every endpoint that returns `documentOCRText` (decisions search, documents endpoint, per-document detail endpoints) caps it at 500 characters — enough for the case caption and judge names, nothing substantive. For full decision text you must fetch the PDF via `documentData.fileDownloadURI`. This is a global API behavior, not a `fields`-projection artifact.
 
-> ⚠ **Naming collision:** the ODP catalog also exposes `/api/v1/petition/decisions/*` ("Petition Decision Search"). This is **not** PTAB data — it is the USPTO Office of Petitions' rulings on procedural prosecution matters (PPH requests, PTA disputes, abandonment revivals). Wrong corpus for this project. Telltale: `finalDecidingOfficeName: "OFFICE OF PETITIONS"` in the record. See `ptab_scope_and_terminology.md` §3.
+> ⚠ **Naming collision:** the ODP catalog also exposes `/api/v1/petition/decisions/*` ("Petition Decision Search"). This is **not** PTAB data — it is the USPTO Office of Petitions' rulings on procedural prosecution matters (PPH requests, PTA disputes, abandonment revivals). Wrong corpus for this project. Telltale: `finalDecidingOfficeName: "OFFICE OF PETITIONS"` in the record. See `../scope/ptab_scope_and_terminology.md` §3.
 
 ### Decisions vs. documents — overlap, not duplication
 
@@ -100,62 +111,52 @@ Conceptually the decisions endpoint is a filtered+enriched view over the decisio
 
 ## 2. Feature → Endpoint map
 
-Feature families follow the priority order in the top-level `README.md` §6.
+> Feature inclusion is gated by `../scope/prediction_scope.md` §4 / §8. Rows below marked "label-only" or "out of scope" are accessible via the API but disallowed as features under the current scope; they're listed here so the endpoint surface stays complete.
 
-| # | Feature family | Specific feature | Endpoint | Source field / derivation | Notes |
+| # | Feature family | Specific feature | Endpoint | Source field / derivation | Status under prediction_scope |
 |---|---|---|---|---|---|
-| — | **Target** | Trial outcome | proceedings POST | `trialMetaData.trialStatusCategory` | Label — not a feature |
-| — | **Target** | Decision-level outcome | decisions POST | `decisionData.trialOutcomeCategory`, `decisionData.appealOutcomeCategory` | Per-decision granularity (vs. per-proceeding) |
-| 1 | Binary flags | Fintiv addressed (Y/N) | decision PDF | Fetch `documentData.fileDownloadURI` → parse text. 500-char OCR preview is insufficient. | Decision PDFs live in Patent File Wrapper Documents bucket (1.2M/wk) |
-| 1 | Binary flags | 325(d) addressed (Y/N) | decisions POST | `decisionData.statuteAndRuleBag` contains `35 USC 325` — structured enum, exact match | **Free** — no PDF fetch needed |
-| 1 | Binary flags | Substantive grounds addressed (102, 103, 112) | decisions POST | `decisionData.issueTypeBag` — structured list of statutory grounds | **Free** — directly usable as categorical features |
-| 1 | Binary flags | Sotera stipulation filed | **external** | Not in PTAB API — requires district-court cross-reference (Docket Navigator or `PTLITIG` bulk probe) | **Gap** — flagged in domain notes |
-| 2 | Ordinal Fintiv ratings | 5-point rating per sub-factor (6 factors) | decision PDF | Fetch decision PDF → LLM / regex over full text under per-factor headings ("factor one" … "factor six") | Decisions follow formulaic structure — tractable once PDF is in hand |
-| 3 | Temporal / regime | Petition filing date | proceedings | `petition_filing_date`, `accorded_filing_date` | |
-| 3 | Temporal / regime | Institution decision date | proceedings | `institution_decision_date` | |
-| 3 | Temporal / regime | Policy-era indicator | proceedings (derived) | Bucketed from `petition_filing_date` against the regime timeline in README §5 | Strong macro predictor |
-| 4 | Metadata | Technology center / group art unit | proceedings | `technology_center`, `group_art_unit` | First two digits of art unit = tech center |
-| 4 | Metadata | Patent age at petition | proceedings (derived) | `petition_filing_date` − `grant_date` | |
-| 4 | Metadata | Counsel identity (petitioner / owner) | proceedings | `petitioner_counsel`, `owner_counsel` | Free text — needs normalization |
-| 4 | Metadata | Real parties in interest | proceedings | `petitioner_real_party`, `owner_real_party` | |
-| 5 | Document-structural | Discretionary-denial section length | documents (petition PDF) | PDF text extraction on petition | Petition OCR is *not* returned by decisions POST — need `/trials/{trial}/documents` → PDF → OCR |
-| 5 | Document-structural | Prior-art reference count | documents (petition PDF) | Parsed from petition body | Same — petition-side, not decision-side |
-| 5 | Document-structural | Petition two-part split (procedural vs. substantive) | documents (petition PDF) | Section detection on petition PDF | Same |
-| 6 | Dispositive factor | Which Fintiv factor drove outcome | decision PDF | LLM classification over full decision text (fetched via `fileDownloadURI`) | Depends on (2) being extracted first |
+| — | **Target** | Trial outcome | proceedings POST | `trialMetaData.trialStatusCategory` | Label |
+| — | **Target** | Decision-level outcome | decisions POST | `decisionData.trialOutcomeCategory`, `decisionData.appealOutcomeCategory` | Label only — terminating FWD per §3 |
+| 1 | Petition-text | Fintiv addressed (Y/N) | **petition PDF** | Petition §IV header presence | **In scope.** Petition-only per §8.1; replaces the decision-PDF path. |
+| 1 | Petition-text | Sotera stipulation present | **petition PDF** | Petition §IV.4 phrase match ("will not pursue" / "stipulate") | **In scope.** Extractable from petition (corrects earlier "external" framing). |
+| 1 | Petition-text | Statute grounds asserted (102/103/112) | **petition PDF** | Petition §I.B grounds table | **In scope.** |
+| 1 | Petition-text | n_challenged_claims, n_grounds, n_prior_art_references | **petition PDF** | §I.B + exhibit list | **In scope.** Full feature catalog: `../features/admissible_documents_analysis.md` §2.6. |
+| 2 | Decision-side structured | `statuteAndRuleBag` (e.g. `35 USC 325` for 325(d)) | decisions POST | `decisionData.statuteAndRuleBag` | **Out of scope as feature** (§4 leakage). Available for label-set debugging only. |
+| 2 | Decision-side structured | `issueTypeBag` (102/103/112 actually addressed by judges) | decisions POST | `decisionData.issueTypeBag` | **Out of scope as feature** (§4 leakage). Useful for evaluating extraction accuracy of feature 1 above. |
+| 2 | Decision PDF text | Fintiv factor ratings, dispositive factor | decision PDF | Full text → LLM/regex over per-factor headings | **Out of scope** (§4 leakage). Available for ground-truth Fintiv labels in evaluation only — see `../scope/ptab_scope_and_terminology.md` §5.4. |
+| 3 | Temporal / regime | Petition filing date (T₀ itself) | proceedings | `petition_filing_date`, `accorded_filing_date` | **In scope.** |
+| 3 | Temporal / regime | Policy-era indicator | proceedings (derived) | Bucketed from `petition_filing_date` per regime table in `../scope/domain_notes.md` | **In scope.** Strong macro predictor. |
+| 3 | Temporal / regime | Institution decision date | proceedings | `institution_decision_date` | **Out of scope** (§4 leakage). Listed for completeness. |
+| 4 | Metadata | Technology center / group art unit | proceedings | `technology_center`, `group_art_unit` | **In scope.** |
+| 4 | Metadata | Patent age at petition | proceedings (derived) | `petition_filing_date` − `grant_date` | **In scope.** |
+| 4 | Metadata | Counsel identity (petitioner / owner) | proceedings + petition | `petitioner_counsel`, `owner_counsel`; richer detail from petition §VI.C | **In scope.** Free text — needs normalization. |
+| 4 | Metadata | Real parties in interest | proceedings + petition §VI.A | `petitioner_real_party`, `owner_real_party` (proceedings often truncates to lead petitioner — petition §VI.A is authoritative) | **In scope.** |
+| 5 | Petition-text structural | Petition word count + utilization | **petition PDF** | §42.24 certification footer | **In scope.** |
+| 5 | Petition-text structural | Prior-art reference count + classification | **petition PDF** | Petition exhibit list | **In scope.** Full taxonomy in `../features/admissible_documents_analysis.md` §6.1. |
 
 ---
 
 ## 3. What the API does *not* give us
 
-Features requiring external sources — flagged early so we don't treat them as "free":
+Features that previously needed external sources — but in our scope are recovered from the petition itself:
 
-- **Sotera stipulation** — petitioner commits in district court, not at PTAB. Needs district-court docket data (e.g., Docket Navigator).
-- **Parallel-litigation status / trial date proximity** (a Fintiv factor) — live district-court trial dates are not in the PTAB API.
-- **Case-status ground truth beyond PTAB** — settlements, dismissals, appeals upstream.
+- **Sotera stipulation** — extracted from petition §IV.4 (phrase match on "will not pursue" / "stipulate" / "agree not to assert"). Earlier drafts flagged this as needing district-court data; it's actually in the petition because the petitioner has every incentive to feature it prominently. See `../scope/ptab_scope_and_terminology.md` §5.
+- **Parallel-litigation status / trial date proximity** — extracted from petition §IV.2 (Fintiv factor 2 narrative cites the actual jury date and district-court schedule). Lower precision than parsing court records directly, but no extra data source needed. See `../scope/prediction_scope.md` §8.3.
 
-These are the main blockers for a purely-PTAB-API pipeline.
+Genuinely missing from a petition-only pipeline:
+
+- **PTAB's internal Fintiv ratings** — only available in the Institution Decision text, which is post-T₀ and excluded by §4. Ground-truth labels for evaluation only.
+- **District-court docket congestion / judge-level statistics** — would enrich Fintiv factor 3 but require PACER or Docket Navigator. Out of scope for v1.
 
 ---
 
 ## 4. Typical extraction path per feature type
 
 - **Structured metadata** → `search_proceedings_post()` with `filters` on `trialMetaData.trialTypeCode` and `rangeFilters` on `petitionFilingDate`, trimmed via `fields`.
-- **Statute / grounds signals** → `search_decisions_post()` reading `decisionData.statuteAndRuleBag` and `decisionData.issueTypeBag` — no text parsing required. This is the "free tier" of decision-side features.
-- **Factor-level ratings, dispositive-factor, Fintiv addressed** → `search_decisions_post()` returns `fileDownloadURI` for each decision; fetch the PDF, OCR/parse, then regex/LLM over the full text. The inline `documentOCRText` is only a 500-char preview and is **not** sufficient.
-- **Petition-side document features** (section length, prior-art count) → `get_trial_documents()` → filter to petition type → fetch petition PDF via `fileDownloadURI` → OCR/text-parse.
-- **Tabular CSV export** (for external analysis) → `download_decisions()` with `format="csv"`. Restricted fields — don't request OCR or appeal fields here.
-- **External signals (Sotera, parallel litigation)** → out of scope for the PTAB-only pipeline; revisit once district-court data source is chosen (probe `PTLITIG` bulk product first).
+- **Petition-text features** (Fintiv, Sotera, grounds, claims, exhibits) → `get_trial_documents()` → filter to petition (`documentNumber == 3` or type "Petition") → fetch PDF via `documentData.fileDownloadURI` → OCR/text-parse with regex on `§` anchors.
+- **Target labels** → `search_decisions_post()` reading `decisionData.trialOutcomeCategory` + `decisionIssueDate` for the terminating FWD; structured fields like `statuteAndRuleBag` / `issueTypeBag` are *available* but disallowed as features per `../scope/prediction_scope.md` §4.
+- **Tabular CSV export** (for external analysis only) → `download_decisions()` with `format="csv"`. Restricted fields — don't request OCR or appeal fields here.
 
-## 5. Cost model for a full ingestion
+## 5. Cost model
 
-Rough estimate (per `rate_limits.md` constraints — serial, ~10 req/sec):
-
-| Pass | Calls | Bucket | Wall time |
-|---|---:|---|---|
-| All proceedings (metadata) | ~200 | Metadata (5M/wk) | ~20 s |
-| All decisions (structured + 500-char preview) | ~200 | Metadata (5M/wk) | ~30–60 s |
-| Per-trial document indices (IPR only) | ~18K | Metadata (5M/wk) | ~30 min |
-| **Decision PDFs** (institution + FWD, ~25K files) | ~25K | File Wrapper Documents (1.2M/wk) | **~40 min** + ~5–15 GB storage |
-| Petition PDFs (selective, if building Priority-5 features) | up to ~18K | File Wrapper Documents (1.2M/wk) | ~30 min + tens of GB |
-
-Total for the core modelling pass (everything except petition PDFs): **~70–80 min wall-clock, under 100K API calls, well under all weekly quotas.**
+For the operational cost model under the petition-only scope, see **`../scope/prediction_scope.md` §5.4** (canonical). The earlier table here that estimated ~25K decision PDFs and 50–90 GB of petition storage assumed a richer pipeline that has since been cut — consult the scope doc for current numbers.
