@@ -4,7 +4,7 @@ A cross-reference between the USPTO PTAB endpoints and the feature families we c
 
 > **Scope note.** Feature inclusion is governed by `../scope/prediction_scope.md` §4 (the T₀ leakage rule) and §8 (modeling assumptions, especially the petition-only PDF policy). This doc is authoritative on *which endpoint returns what*; `../scope/prediction_scope.md` is authoritative on *what we're allowed to use*. Where the two appear to disagree, scope wins.
 
-Client code: `src/data/client.py`. Normalized schemas: `proceedings.md`.
+Client code: `src/data/client.py`. The proceedings endpoint and the documents/search endpoint serve **complementary** roles — see `proceedings.md` for the live-vs-frozen distinction.
 
 **Authoritative API references**:
 - Swagger UI / OpenAPI spec: <https://data.uspto.gov/swagger/index.html> — endpoint paths, request parameters, response body schemas.
@@ -15,52 +15,60 @@ Client code: `src/data/client.py`. Normalized schemas: `proceedings.md`.
 
 ## 1. Endpoints available
 
+> **Proceedings and documents serve complementary roles.** Proceedings holds **live** trial-level state (current status, terminationDate, etc.). Documents/search returns one row per filing with a **denormalized but frozen-at-document-time** copy of the trial header. For our T₀-anchored task this is actually a feature: the petition row's header is frozen at T₀, so post-T₀ fields can't leak. See `proceedings.md` for the empirical evidence.
+
 | Endpoint | Method in `USPTOClient` | Returns | Primary use |
 |---|---|---|---|
-| `GET /trials/proceedings/search` | `search_proceedings()` | Paginated list of proceedings (trial metadata) | Simple keyword search |
-| `POST /trials/proceedings/search` | `search_proceedings_post()` | Same as GET but accepts structured `filters`, `rangeFilters`, `fields`, `facets`, `sort` | **Primary ingestion path** — target-variable source, surgical date/type slicing, facet exploration |
-| `GET /trials/proceedings/search/download` | *(not wrapped)* | CSV or JSON file attachment of proceeding-level metadata (one row per case) | Bulk metadata export when you want all ~19K proceedings as a single file instead of paginating `/search`. **Empirically returns 403 'Forbidden' under load** while `/search` and path-style endpoints continue to work — see download-bucket caveat below. |
-| `GET /trials/proceedings/{trial_number}` | `get_proceeding()` | Single proceeding's full record. Includes `trialMetaData.fileDownloadURI` → **whole-case ZIP of every filing's PDF**. | Detailed per-case metadata lookup; also the entry point for whole-docket bulk pulls. |
-| `GET /trials/decisions/search` | `search_decisions()` | Paginated list of decisions | Simple keyword search |
-| `POST /trials/decisions/search` | `search_decisions_post()` | Structured decision metadata + a **500-char OCR preview** (`documentData.documentOCRText`). Full decision text is **not** returned. | **Primary path for structured decision signals** — `decisionData.statuteAndRuleBag`, `issueTypeBag`, `trialOutcomeCategory`, `appealOutcomeCategory`. For full text (Fintiv factor ratings, dispositive factor) you must fetch the decision PDF via `fileDownloadURI`. |
-| `POST /trials/decisions/search/download` | `download_decisions()` | CSV or JSON file attachment of decision metadata | Fast tabular export; **restricted field projection** — rejects `documentOCRText`, `fileDownloadURI`, `appealOutcomeCategory` |
-| `GET /trials/{trial_number}/documents` | `get_trial_documents()` | Full filing list for a trial (petition, POPR, institution decision, briefs, FWD, …) | Per-trial document index — still needed for petition / POPR text (which is *not* in the decisions endpoint response) |
-| `GET /trials/documents/search/download` | *(not wrapped, inferred — not yet probed)* | Cross-trial filing-level metadata as CSV/JSON. One row per filing with `documentTypeName`, `documentFilingDate`, `fileDownloadURI`. | Bulk filing-index for "find all institution decisions / all petitions across the whole corpus" without per-trial calls. **Schema not yet empirically verified.** |
-| `GET <trialMetaData.fileDownloadURI>` | *(not wrapped)* | Whole-case ZIP of every filing's PDF. Probed on IPR2026-00339: 33 PDFs / 202 MB. | Per-proceeding bulk PDF pull. Use targeted single-PDF fetches (via `documentData.fileDownloadURI`) over this when you only need decision PDFs — naive whole-case zips × 18K cases ≈ multi-TB. |
+| `POST /trials/proceedings/search` | `search_proceedings_post()` | One row per trial with **live** trial / patent / party blocks. | **Primary trial-inventory + label source.** Use for `trialStatusCategory`, `terminationDate`, `latestDecisionDate` (current values). |
+| `POST /trials/documents/search` | *(client method TBD — `search_documents_post()`)* | Cross-trial document records. Each row carries the document PDF link **plus** the parent trial's header *as it was when the document was last indexed*. `decisionData` populates only on decision-type rows. | **Primary feature snapshot.** Filter to `documentCategory: "PETITION"` → one row per trial with frozen-at-T₀ header + petition URI. Filter to `"FINAL"` → label rows with populated `decisionData`. |
+| `POST /trials/decisions/search` | `search_decisions_post()` | Structured decision metadata + a **500-char OCR preview** (`documentData.documentOCRText`). Full decision text is **not** returned. | Alternative label-assembly path when you want decision rows directly. Equivalent to documents/search filtered to decision categories, but pre-filtered by the API. |
+| `POST /trials/decisions/search/download` | `download_decisions()` | CSV or JSON file attachment of decision metadata | Fast tabular export of decisions only; **restricted field projection** — rejects `documentOCRText`, `fileDownloadURI`, `appealOutcomeCategory`. |
+| `GET /trials/{trial_number}/documents` | `get_trial_documents()` | Full filing list for a trial (capped at 25 records, no pagination). | Per-trial deep dive during exploration. Not used at corpus scale due to the 25-record cap. |
+| `GET <documentData.fileDownloadURI>` | *(not wrapped)* | Single PDF — typically the petition (~4 MB). | Per-document PDF fetch for petition-text feature extraction. |
+| `GET <trialMetaData.fileDownloadURI>` | *(not wrapped)* | Whole-case ZIP of every filing's PDF (~50–500 MB / case). | Reserved for one-off deep dives. Not used at corpus scale. |
+| `GET /trials/proceedings/{trial_number}` | `get_proceeding()` | Single proceeding's full record + whole-case `trialMetaData.fileDownloadURI`. | Use when you need the whole-case ZIP URI for one specific trial. |
 
 All `/trials/*` calls above fall in the **metadata retrieval bucket** (5M calls/week combined, serial-only, burst=1). See `rate_limits.md` for full constraints.
 
-> ⚠ **`/search/download` endpoints sit in a stricter bucket than `/search`.** Empirically observed 2026-04-25: same key, same IP, same minute — `/proceedings/search/download?q=IPR2026-00339` returned `{"message":"Forbidden"}` (HTTP 403, AWS API Gateway-style body) while `/proceedings/search` and `/proceedings/{trial_number}` returned 200 fine. Swagger UI calls also kept working. Hypothesis: download endpoints are gated by a separate WAF/quota rule (possibly on caller fingerprint — Swagger sends `Origin: data.uspto.gov`). For ingestion at scale, prefer the paginated POST `/search` route over `/search/download` until this is diagnosed; or front the call with `Origin`/`Referer`/browser-`User-Agent` headers.
+> ⚠ **GET vs POST.** `/trials/documents/search` and `/trials/decisions/search` are **POST-only** — GET returns 404. Same is *not* true of `/trials/proceedings/search` (both methods work; POST is the structured-query form).
 
-### The three-level data model
+> ⚠ **`/search/download` endpoints sit in a stricter bucket than `/search`.** Empirically observed 2026-04-25: same key, same IP, same minute — `/proceedings/search/download?q=IPR2026-00339` returned `{"message":"Forbidden"}` (HTTP 403) while `/proceedings/search` and path-style endpoints returned 200. For ingestion at scale, prefer the paginated POST `/search` route over `/search/download` until this is diagnosed.
 
-PTAB data is structured as a one-to-many hierarchy. Every download endpoint exports metadata at one of these levels — choosing the right one is about granularity, not filtering:
+> ⚠ **`documentTypeName` is unindexed.** Empirical (2026-04-26): filtering or faceting on `documentData.documentTypeName` returns empty. Use `documentData.documentCategory` (case-insensitive — `"PETITION"` and `"Petition"` both work).
+
+### The data model — denormalized, with two freshness regimes
+
+PTAB data is conceptually a one-to-many hierarchy (Trial → Documents → PDF bytes). The API exposes it through two endpoints that differ on **freshness**, not on schema:
 
 ```mermaid
 flowchart TB
-    P[Proceeding<br/>~19K records<br/>1 row per trial/case]
-    D[Documents<br/>~millions<br/>1 row per filing]
-    PDF[PDF bytes<br/>the actual files]
-    P --> D
-    D --> PDF
-    P -. /proceedings/search[/download] .- A1[ ]
-    D -. /documents/search/download<br/>/trials/{n}/documents .- A2[ ]
-    PDF -. fetch &lt;fileDownloadURI&gt; .- A3[ ]
-    style A1 fill:none,stroke:none
-    style A2 fill:none,stroke:none
-    style A3 fill:none,stroke:none
+    subgraph Live["proceedings/search row<br/>(LIVE — current trial state)"]
+        TH1[trialMetaData<br/>current trialStatusCategory<br/>current terminationDate, etc.]
+        POD1[patentOwnerData]
+        PET1[regularPetitionerData]
+    end
+    subgraph Frozen["documents/search row<br/>(FROZEN — at document indexing time)"]
+        TH2[trialMetaData<br/>snapshot at lastModifiedDateTime]
+        POD2[patentOwnerData]
+        PET2[regularPetitionerData]
+        DOC[documentData<br/>this document + fileDownloadURI]
+        DD[decisionData<br/>populated only on decision-type rows]
+    end
+    Frozen --> PDF[PDF bytes via<br/>documentData.fileDownloadURI]
 ```
 
-**Same trial number filter, three different return shapes:**
+**Implication for the leakage rule.** Pulling the petition document row gives you a header snapshot frozen at petition-indexing time, which is essentially T₀. Post-T₀ fields like `terminationDate` are simply absent rather than populated-and-must-be-discarded. The proceedings row is the opposite: live state, but mixes pre- and post-T₀ fields in the same JSON object — every consumer of proceedings data must implement provenance discipline. Documents/search-petition shifts that discipline upstream into the API itself.
 
-| Call | Rows for IPR2026-00339 | Each row represents |
+**Same trial number filter, multiple return shapes:**
+
+| Call | Rows for one trial | Each row represents |
 |---|---:|---|
-| `/proceedings/search/download?q=IPR2026-00339` | 1 | the case (header) |
-| `/documents/search/download?q=IPR2026-00339` *(inferred)* | ~33 | one filing in the case |
-| `/decisions/search/download?q=IPR2026-00339` | 0–N | one decision-type filing |
+| `/proceedings/search` | 1 | the case (header), live state |
+| `/documents/search` filter `documentCategory: PETITION` | 1 (typically) | trial header frozen at petition filing **plus** the petition document |
+| `/documents/search` filter `documentCategory: FINAL` | 0–N | terminating-FWD rows with populated `decisionData` |
+| `/documents/search` no document filter | ~30–150 | one filing per row |
+| `/decisions/search` | 0–N | one decision-type filing (filtered subset of documents/search) |
 | `GET <trialMetaData.fileDownloadURI>` | (binary) | every PDF in the case, zipped |
-
-Filtering changes *how many* rows match; granularity determines *what each row is*. The endpoints are **complementary tables joined on `trialNumber`**, not interchangeable views — pick by what each row should mean.
 
 ### Two distinct `fileDownloadURI` fields
 
@@ -79,20 +87,12 @@ Both are direct downloads via the authenticated session (`X-API-Key`). Reuse `cl
 
 ### Decisions vs. documents — overlap, not duplication
 
-The decisions and documents endpoints return **the same physical papers** for the decision-type subset. Confirmed empirically on `IPR2022-01002`: the 3 records from `/trials/decisions/search` have identical `documentIdentifier`s to 3 of the 145 records from `/trials/{trial}/documents`. Same PDFs, same OCR text.
+The decisions endpoint is a **filtered subset of documents/search**, restricted to decision-type rows. Confirmed empirically on `IPR2022-01002`: the 3 records from `/trials/decisions/search` have identical `documentIdentifier`s to 3 of the 145 records from `/trials/{trial}/documents` — same PDFs, same OCR text. The cross-trial `/trials/documents/search` carries `decisionData` denormalized onto every row, so for label assembly you can either:
 
-| | `/trials/{trial}/documents` | `/trials/decisions/search` |
-|---|---|---|
-| Scope | Per-trial, **all papers** (petitions, POPRs, exhibits, orders, decisions, …) | Cross-trial, **decision papers only** |
-| Query | GET, `{trial}` in path | POST with full Simplified Query Syntax |
-| Extra fields | None — documents only | **`decisionData.{trialOutcomeCategory, decisionTypeCategory, issueTypeBag, statuteAndRuleBag, appealOutcomeCategory}`** |
-| OCR reliability | Inconsistent (observed 3/25 populated); **500-char preview** when present | Reliable when requested via `fields`, but **capped at 500 chars** (preview, not full text) |
+- **Pull labels from documents/search directly.** The petition row's `decisionData` block carries the same `trialOutcomeCategory` / `appealOutcomeCategory` / `statuteAndRuleBag` tags. One call, one row per trial.
+- **Pull labels from decisions/search.** Cleaner if you only want decision rows and want to filter by `decisionIssueDate` ranges. Useful as a fallback when `decisionData` on a petition row is empty (e.g., trials still in progress at indexing time).
 
-Conceptually the decisions endpoint is a filtered+enriched view over the decision-type subset of documents. To avoid duplicate ingestion, pick a path per use case rather than calling both for the same trial:
-
-- **Decision text + outcome labels (cross-trial)** → decisions POST only.
-- **Petitions / POPRs / exhibits / full timeline (per-trial)** → documents endpoint; strip or skip decision-type papers if already ingested.
-- **Both at scale** → decisions POST first (cross-trial), then per-trial documents calls filtered to `trialDocumentCategory != "Decision"`.
+The decisions endpoint stays in the toolkit, but is no longer the primary label source — documents/search is.
 
 ### POST Simplified Query Syntax — key notes
 
@@ -113,24 +113,29 @@ Conceptually the decisions endpoint is a filtered+enriched view over the decisio
 
 > Feature inclusion is gated by `../scope/prediction_scope.md` §4 / §8. Rows below marked "label-only" or "out of scope" are accessible via the API but disallowed as features under the current scope; they're listed here so the endpoint surface stays complete.
 
+**Where each row of the model matrix comes from:**
+- *Trial inventory + label* → `POST /trials/proceedings/search` (live trial state — canonical list of all 18K IPRs).
+- *Structured features + petition URI* → for each trial, `POST /trials/documents/search` filtered by `trialNumber`, then run the petition picker (see `proceedings.md`). Header on the picked petition row is **frozen at T₀**, so post-T₀ leakage is structurally impossible. The corpus-wide `documentCategory: "PETITION"` shortcut only catches ~6K of 18K trials — pre-2022 petitions live in the legacy `Paper` category.
+- *Petition-text features* → fetch the PDF from `documentData.fileDownloadURI` on the picked row.
+
 | # | Feature family | Specific feature | Endpoint | Source field / derivation | Status under prediction_scope |
 |---|---|---|---|---|---|
-| — | **Target** | Trial outcome | proceedings POST | `trialMetaData.trialStatusCategory` | Label |
-| — | **Target** | Decision-level outcome | decisions POST | `decisionData.trialOutcomeCategory`, `decisionData.appealOutcomeCategory` | Label only — terminating FWD per §3 |
+| — | **Target** | Trial outcome | proceedings/search (live state) | `trialMetaData.trialStatusCategory` | Label |
+| — | **Target** | Terminating-FWD outcome | documents/search filtered to `FINAL` | `decisionData.trialOutcomeCategory`, `decisionData.appealOutcomeCategory`, `decisionData.decisionIssueDate` | Label only — terminating FWD per §3 |
 | 1 | Petition-text | Fintiv addressed (Y/N) | **petition PDF** | Petition §IV header presence | **In scope.** Petition-only per §8.1; replaces the decision-PDF path. |
 | 1 | Petition-text | Sotera stipulation present | **petition PDF** | Petition §IV.4 phrase match ("will not pursue" / "stipulate") | **In scope.** Extractable from petition (corrects earlier "external" framing). |
 | 1 | Petition-text | Statute grounds asserted (102/103/112) | **petition PDF** | Petition §I.B grounds table | **In scope.** |
 | 1 | Petition-text | n_challenged_claims, n_grounds, n_prior_art_references | **petition PDF** | §I.B + exhibit list | **In scope.** Full feature catalog: `../features/admissible_documents_analysis.md` §2.6. |
-| 2 | Decision-side structured | `statuteAndRuleBag` (e.g. `35 USC 325` for 325(d)) | decisions POST | `decisionData.statuteAndRuleBag` | **Out of scope as feature** (§4 leakage). Available for label-set debugging only. |
-| 2 | Decision-side structured | `issueTypeBag` (102/103/112 actually addressed by judges) | decisions POST | `decisionData.issueTypeBag` | **Out of scope as feature** (§4 leakage). Useful for evaluating extraction accuracy of feature 1 above. |
+| 2 | Decision-side structured | `statuteAndRuleBag` (e.g. `35 USC 325` for 325(d)) | documents/search filtered to `FINAL` (or decisions POST) | `decisionData.statuteAndRuleBag` | **Out of scope as feature** (§4 leakage). Available for label-set debugging only. |
+| 2 | Decision-side structured | `issueTypeBag` (102/103/112 actually addressed by judges) | documents/search filtered to `FINAL` (or decisions POST) | `decisionData.issueTypeBag` | **Out of scope as feature** (§4 leakage). Useful for evaluating extraction accuracy of feature 1 above. |
 | 2 | Decision PDF text | Fintiv factor ratings, dispositive factor | decision PDF | Full text → LLM/regex over per-factor headings | **Out of scope** (§4 leakage). Available for ground-truth Fintiv labels in evaluation only — see `../scope/ptab_scope_and_terminology.md` §5.4. |
-| 3 | Temporal / regime | Petition filing date (T₀ itself) | proceedings | `petition_filing_date`, `accorded_filing_date` | **In scope.** |
-| 3 | Temporal / regime | Policy-era indicator | proceedings (derived) | Bucketed from `petition_filing_date` per regime table in `../scope/domain_notes.md` | **In scope.** Strong macro predictor. |
-| 3 | Temporal / regime | Institution decision date | proceedings | `institution_decision_date` | **Out of scope** (§4 leakage). Listed for completeness. |
-| 4 | Metadata | Technology center / group art unit | proceedings | `technology_center`, `group_art_unit` | **In scope.** |
-| 4 | Metadata | Patent age at petition | proceedings (derived) | `petition_filing_date` − `grant_date` | **In scope.** |
-| 4 | Metadata | Counsel identity (petitioner / owner) | proceedings + petition | `petitioner_counsel`, `owner_counsel`; richer detail from petition §VI.C | **In scope.** Free text — needs normalization. |
-| 4 | Metadata | Real parties in interest | proceedings + petition §VI.A | `petitioner_real_party`, `owner_real_party` (proceedings often truncates to lead petitioner — petition §VI.A is authoritative) | **In scope.** |
+| 3 | Temporal / regime | Petition filing date (T₀ itself) | documents/search | `trialMetaData.petitionFilingDate`, `trialMetaData.accordedFilingDate` | **In scope.** |
+| 3 | Temporal / regime | Policy-era indicator | documents/search (derived) | Bucketed from `petitionFilingDate` per regime table in `../scope/domain_notes.md` | **In scope.** Strong macro predictor. |
+| 3 | Temporal / regime | Institution decision date | proceedings/search (live) | `trialMetaData.institutionDecisionDate` | **Out of scope** (§4 leakage). Listed for completeness — note: not present on the documents/search petition row because the row is frozen at T₀. |
+| 4 | Metadata | Technology center / group art unit | documents/search | `patentOwnerData.technologyCenterNumber`, `patentOwnerData.groupArtUnitNumber` | **In scope.** |
+| 4 | Metadata | Patent age at petition | documents/search (derived) | `petitionFilingDate` − `patentOwnerData.grantDate` | **In scope.** |
+| 4 | Metadata | Counsel identity (petitioner / owner) | documents/search + petition | `regularPetitionerData.counselName`, `patentOwnerData.counselName`; richer detail from petition §VI.C | **In scope.** Free text — needs normalization. |
+| 4 | Metadata | Real parties in interest | documents/search + petition §VI.A | `regularPetitionerData.realPartyInInterestName`, `patentOwnerData.realPartyInInterestName`; the API field truncates joinder to the lead petitioner — petition §VI.A is authoritative | **In scope.** |
 | 5 | Petition-text structural | Petition word count + utilization | **petition PDF** | §42.24 certification footer | **In scope.** |
 | 5 | Petition-text structural | Prior-art reference count + classification | **petition PDF** | Petition exhibit list | **In scope.** Full taxonomy in `../features/admissible_documents_analysis.md` §6.1. |
 
@@ -152,9 +157,13 @@ Genuinely missing from a petition-only pipeline:
 
 ## 4. Typical extraction path per feature type
 
-- **Structured metadata** → `search_proceedings_post()` with `filters` on `trialMetaData.trialTypeCode` and `rangeFilters` on `petitionFilingDate`, trimmed via `fields`.
-- **Petition-text features** (Fintiv, Sotera, grounds, claims, exhibits) → `get_trial_documents()` → filter to petition (`documentNumber == 3` or type "Petition") → fetch PDF via `documentData.fileDownloadURI` → OCR/text-parse with regex on `§` anchors.
-- **Target labels** → `search_decisions_post()` reading `decisionData.trialOutcomeCategory` + `decisionIssueDate` for the terminating FWD; structured fields like `statuteAndRuleBag` / `issueTypeBag` are *available* but disallowed as features per `../scope/prediction_scope.md` §4.
+- **Trial inventory** → `POST /trials/proceedings/search` filtered to `trialMetaData.trialTypeCode: "IPR"`, paginated. ~18K rows, one per trial.
+- **Per-trial petition row + T₀-frozen header** → for each trial from the inventory, `POST /trials/documents/search` with `filters: [{name: "trialNumber", value: [<trial>]}]`, paginated. Apply the petition picker from `proceedings.md` to the resulting document list. The picker is empirically validated at 100% recall across 72 sampled legacy trials (2014–2022).
+- **Petition-text features** (Fintiv, Sotera, grounds, claims, exhibits) → fetch PDF via `documentData.fileDownloadURI` from the picked row → OCR/text-parse with regex on `§` anchors.
+- **Label** (terminating-FWD outcome) — pick one of:
+  - `POST /trials/proceedings/search` for live `trialStatusCategory` + `terminationDate` per trial.
+  - `POST /trials/documents/search` filtered to `documentCategory: "FINAL"`, projecting `decisionData` and `trialMetaData`. Pick the row with the latest `decisionIssueDate` per trial (handles remand cases — see `../examples/ipr_lifecycle_case_study.md`).
+  - `POST /trials/decisions/search` is equivalent to the FINAL-filtered documents query for our purposes.
 - **Tabular CSV export** (for external analysis only) → `download_decisions()` with `format="csv"`. Restricted fields — don't request OCR or appeal fields here.
 
 ## 5. Cost model

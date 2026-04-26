@@ -119,10 +119,10 @@ flowchart LR
 
 We open exactly one PDF per trial: the petition (Paper 3), plus optionally a small ranking-notice PDF (Paper 2, ~140 KB, only present when ≥2 petitions stack against the same patent). Per §8.1 every other admissible PDF is skipped. Net text-storage budget: **~4–5 GB corpus-wide** (~18K petitions × ~4 MB ≈ 70 GB upper bound; in practice many petitions are smaller).
 
-Retrieval path per trial:
-1. `GET /trials/{trial}/documents` (capped at 25; petition is Paper 3 — well within the cap).
-2. Filter to the petition paper (`documentNumber == 3` or `documentTypeDescriptionText` matching "Petition").
-3. Fetch PDF via `documentData.fileDownloadURI`.
+Retrieval path:
+1. **Trial inventory + label** — `POST /trials/proceedings/search` paginated, filtered to `trialMetaData.trialTypeCode: "IPR"`. One row per trial with live `trialStatusCategory`, `terminationDate`, etc.
+2. **Per-trial petition row** — for each trial, `POST /trials/documents/search` with `filters: [{name: "trialNumber", value: [<trial>]}]`, paginated. Run the petition picker (see `../api/proceedings.md` "Petition coverage and the category-taxonomy drift") to identify the petition row from its document-list. The picker handles both the new `documentCategory: "PETITION"` taxonomy and the legacy `Paper` catch-all bucket. Each picked row carries the petition document's `documentData` (including `fileDownloadURI`) plus a **header frozen at T₀** (`trialMetaData`, `patentOwnerData`, `regularPetitionerData`) — a leakage-discipline win because post-T₀ fields like `terminationDate` are simply absent on petition rows.
+3. **PDF download** — `GET <documentData.fileDownloadURI>` from the picked row.
 
 ### 5.3 Patent file wrapper bulk products become first-tier
 
@@ -137,15 +137,17 @@ Download-once-cache-locally discipline applies (the 20-per-file-per-year bulk ca
 
 ### 5.4 Cost model (canonical for this scope)
 
+The corpus-wide `documentCategory: "PETITION"` filter only catches ~6K of the ~18K IPR trials, because pre-2022 trials use the legacy `Paper` category (which is also a catch-all for all procedural papers). The actually-correct ingestion path is **one per-trial documents/search call** (validated empirically at 100% recall — see `../api/proceedings.md`).
+
 | Pass | Calls / size | Bucket | Wall time |
 |---|---:|---|---|
-| Proceedings (label + petition-time metadata) | ~200 | Metadata (5M/wk) | ~30 s |
-| Decisions (labels only — `trialOutcomeCategory`, `decisionIssueDate`) | ~200 | Metadata (5M/wk) | ~30 s |
-| Per-trial petition lookup (1 call / trial) | ~18K | Metadata (5M/wk) | ~30 min |
+| Trial inventory + label — `POST /trials/proceedings/search` paginated | ~200 calls | Metadata (5M/wk) | ~30 s |
+| Per-trial documents enumeration + petition picker — `POST /trials/documents/search` filtered by `trialNumber` | ~18K calls (1 per trial; most trials fit in one page of 100 docs) | Metadata (5M/wk) | ~30 min serial, less with parallelism |
+| Optional FWD label cross-check — `POST /trials/documents/search` filtered to `documentCategory: "FINAL"` | ~20 calls | Metadata (5M/wk) | ~5 s |
 | Petition PDF downloads | ~18K, **~4–5 GB** | File-Wrapper Documents (1.2M/wk) | ~30 min |
 | Bulk: `PASDL` + `PTMNFEE2` + `PTFWPRE` | 3 products, ~70 GB | Bulk (20/file/yr) | one-time |
 
-Total live-API wall-clock: **~60 min**. Storage dominated by `PTFWPRE` (~63 GB); petition PDFs are now a small fraction (~4–5 GB) of the footprint. **This table is canonical for this project — `../api/rate_limits.md` §2 and `../api/api_feature_map.md` §5 defer to it.**
+Total live-API wall-clock: **~60 min**, split roughly evenly between per-trial document enumeration and PDF downloads. Both fit comfortably inside the 5M/wk metadata bucket and the 1.2M/wk file-wrapper bucket. Storage dominated by `PTFWPRE` (~63 GB); petition PDFs are ~4–5 GB. **This table is canonical for this project — `../api/rate_limits.md` §2 and `../api/api_feature_map.md` §5 defer to it.**
 
 ### 5.5 Train / test symmetry
 
@@ -153,7 +155,12 @@ Every feature is observable at T₀, so training and inference paths are identic
 
 ### 5.6 Leakage discipline as a first-class concern
 
-Each feature column in the modelling matrix should declare its provenance: which source produced it and what date that source is anchored to relative to T₀. The pipeline should reject columns that can't prove they're ≤ T₀. The proceedings record in particular mixes pre- and post-petition fields in the same JSON object — without a provenance check it's easy to silently leak `terminationDate` or `institutionDecisionDate` into a feature.
+Each feature column in the modelling matrix should declare its provenance: which source produced it and what date that source is anchored to relative to T₀. The pipeline should reject columns that can't prove they're ≤ T₀.
+
+The two metadata sources differ on how leakage-resistant they are out of the box:
+
+- **`documents/search` filtered to PETITION rows** — header is **frozen at T₀**. Post-T₀ mutable fields like `terminationDate` and `institutionDecisionDate` are simply absent on these rows (verified empirically 2026-04-26). Use this as the primary feature snapshot; the API itself enforces the leakage discipline.
+- **`proceedings/search`** — header is **live**. The same JSON object mixes admissible fields (`petitionFilingDate`, `accordedFilingDate`, static patent / party blocks) with post-T₀ fields (`trialStatusCategory`, `terminationDate`, `institutionDecisionDate`, `latestDecisionDate`). Use only for the label, never for features without an explicit field-level allowlist.
 
 ## 6. Document map (what each doc owns)
 
@@ -168,9 +175,9 @@ Each feature column in the modelling matrix should declare its provenance: which
 | `../features/admissible_documents_analysis.md` | Per-document analysis for `IPR2022-01002`; defines the 54-feature petition-derived catalog and tier demotions. |
 | `domain_notes.md` | Legal-domain *why* behind features. Reconciled with binary-classification scope and petition-only feature policy. |
 | `../examples/ipr_lifecycle_case_study.md` | Full IPR lifecycle (1,430 days, 145 papers). §9 explicitly lists Phases 3–8 as out-of-scope as feature sources. Orientation only. |
-| `../api/proceedings.md` | Column dictionary for the proceedings endpoint. |
-| `src/data/admissibility.py` | T₀ leakage filter — partitions a trial's documents by `documentFilingDate ≤ T₀`. |
-| `src/data/client.py` | API client. POST methods + `get_trial_documents` are the active surface. |
+| `../api/proceedings.md` | Live-vs-frozen distinction between the proceedings and documents endpoints (empirical, 2026-04-26). Proceedings = label source; documents/search-petition = T₀-frozen feature snapshot. |
+| `src/ml_uspto/parse/admissibility.py` | T₀ leakage filter — partitions a trial's documents by `documentFilingDate ≤ T₀`. |
+| `src/ml_uspto/clients/uspto.py` | API client. Proceedings POST + documents POST + decisions POST are all part of the active surface — distinct roles per `../api/proceedings.md`. |
 
 ## 7. Open questions and sensitivity tests
 
