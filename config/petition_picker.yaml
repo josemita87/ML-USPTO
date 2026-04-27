@@ -1,0 +1,37 @@
+# Layered filter for the petition document among a trial's filings.
+# See `src/ml_uspto/parse/petition_picker.py` for the resolution logic and
+# `docs/api/proceedings.md` for the category-taxonomy drift this works around.
+
+# Title MUST match at least one of these alternatives (case-insensitive).
+# Joined with `|` at load time.
+title_alternatives:
+  - \bpetition\b
+  - \binter\s+part(?:e|ie)s\s+review\s+of\b
+  - \brequest\s+for\s+(?:inter\s+part(?:e|ie)s\s+review|ipr)\b
+
+# Title MUST NOT match any of these alternatives (case-insensitive).
+# The `petitioner['']?s\s+(?!petition\b)` clause uses a negative lookahead so
+# "Petitioner's Reply" / "Petitioner's Mandatory Notices" / etc. are rejected
+# while "Petitioner's Petition for Inter Partes Review" passes through.
+blacklist_alternatives:
+  - power of attorney
+  - notice of appeal
+  - petitioner['’]?s\s+(?!petition\b)
+  - notice of (filing date accorded|accord)
+  - request for (refund|rehearing)
+  - sur-?reply
+  - surreply
+  - response to petition
+  - denying institution
+  - institution of inter partes
+  - motion for joinder
+  - grant of motion for joinder
+
+# Empirically 94% of real petitions sit at paper 1–3, none observed past
+# paper 8 across 239 stratified trials. Drop rows at or above this number.
+paper_number_ceiling: 10
+
+# `documentCategory` values to exclude outright.
+exhibit_categories:
+  - exhibit
+  - exhibits

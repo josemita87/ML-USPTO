@@ -12,14 +12,14 @@ the category-taxonomy drift" for the mechanic.
 `pick_petition` resolves this with a layered filter applied to the row
 list:
 
-1. Drop exhibits (`documentCategory` ∈ {exhibit, exhibits}).
-2. Drop high paper numbers (`documentNumber >= 10`) — empirically 94% of
-   real petitions sit at paper 1–3 and none observed past paper 8 across
-   239 stratified trials.
-3. Title must match the petition regex — covers "Petition for…",
+1. Drop exhibits (`documentCategory` ∈ EXHIBIT_CATEGORIES).
+2. Drop high paper numbers (`documentNumber >= PAPER_NUMBER_CEILING`) —
+   empirically 94% of real petitions sit at paper 1–3 and none observed
+   past paper 8 across 239 stratified trials.
+3. Title must match PETITION_TITLE — covers "Petition for…",
    "Inter Partes Review of [patent]", "Request for IPR…", and the
    "Petitioner's Petition for…" phrasing.
-4. Title must NOT match the blacklist — strips out near-misses like
+4. Title must NOT match BLACKLIST — strips out near-misses like
    "Power of Attorney", "Notice of Filing Date Accorded to Petition",
    "Petitioner's Reply", "Sur-Reply", joinder motions, etc.
 5. Among the survivors, take the lowest `documentNumber` — this picks the
@@ -31,6 +31,9 @@ miss rate falls through to a quarantine list rather than feeding wrong
 PDFs into the feature pipeline — this is the right failure mode for a
 leakage-sensitive system.
 
+Picker constants live in `config/petition_picker.yaml` and are exposed via
+`ml_uspto.parse.schemas.constants`.
+
 Usage:
     from ml_uspto.parse.petition_picker import pick_petition
     rows = client.search_documents_post(filters=[{"name":"trialNumber","value":[t]}])["patentTrialDocumentDataBag"]
@@ -39,32 +42,15 @@ Usage:
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-PETITION_TITLE = re.compile(
-    r"\bpetition\b|"
-    r"\binter\s+part(?:e|ie)s\s+review\s+of\b|"
-    r"\brequest\s+for\s+(?:inter\s+part(?:e|ie)s\s+review|ipr)\b",
-    re.I,
+from ml_uspto.parse.schemas.constants import (
+    BLACKLIST,
+    EXHIBIT_CATEGORIES,
+    PAPER_NUMBER_CEILING,
+    PETITION_TITLE,
 )
-
-# The `petitioner['']?s\s+(?!petition\b)` clause uses a negative lookahead so
-# "Petitioner's Reply" / "Petitioner's Mandatory Notices" / etc. are rejected
-# while "Petitioner's Petition for Inter Partes Review" passes through.
-BLACKLIST = re.compile(
-    r"power of attorney|notice of appeal|"
-    r"petitioner['’]?s\s+(?!petition\b)|"
-    r"notice of (filing date accorded|accord)|"
-    r"request for (refund|rehearing)|sur-?reply|surreply|"
-    r"response to petition|denying institution|institution of inter partes|"
-    r"motion for joinder|grant of motion for joinder",
-    re.I,
-)
-
-PAPER_NUMBER_CEILING = 10
-EXHIBIT_CATEGORIES = {"exhibit", "exhibits"}
 
 
 def pick_petition(rows: Iterable[Mapping[str, Any]]) -> dict | None:

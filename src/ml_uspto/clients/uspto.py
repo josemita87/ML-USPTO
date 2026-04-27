@@ -38,7 +38,7 @@ class USPTOClient:
         url = f"{self.base_url}/trials/proceedings/{trial_number}"
         return self._get(url)
 
-    def get_trial_documents(self, trial_number: str) -> dict:
+    def get_documents(self, trial_number: str) -> dict:
         url = f"{self.base_url}/trials/{trial_number}/documents"
         return self._get(url)
 
