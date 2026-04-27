@@ -28,6 +28,39 @@ The actual mechanic — what `trialMetaData` on a document row really is:
 
 The naive read of "documents/search returns a petition snapshot" — used by an earlier draft of this doc and confirmed by a 6-trial sample of recent (2025–2026) trials — was wrong: that sample landed on trials where the documents-side lag *happened* to keep the stamp near T₀, but for older finished trials the lag has long since elapsed and the petition row carries fully post-T₀ status / dates.
 
+## The proceedings status stops at "FWD reached" — the verdict is only on `/decisions`
+
+Empirical (probe of 1,000 IPR2022 records, 2026-04-27): the deepest the proceedings `trialStatusCategory` ever gets for an FWD-completed trial is **`Final Written Decision`** or **`Final Written Decision - Appealed`**. It does *not* distinguish between the three FWD verdicts that drive the label:
+
+- All challenged claims unpatentable → label 1
+- Mixed (some claims survived) → label 0
+- All claims patentable → label 0
+
+The verdict-level field (`trialOutcomeCategory == "All Challenged Claims Unpatentable"` etc.) lives only on `decisionData` from `/trials/decisions/search`. Full-record dumps of FWD-status proceedings rows (IPR2025-00954 "Final Written Decision", IPR2025-00748 "Final Written Decision - Appealed", IPR2025-00742 "Terminated-Adverse Judgment") confirmed there is no hidden verdict field on the proceedings side.
+
+**Empirical `trialStatusCategory` taxonomy (1000-record IPR2022 sample):**
+
+| Status | Count | Label-construction role |
+|---|---:|---|
+| `Terminated-Settled` | 334 | Status alone → label 0 |
+| `Final Written Decision` | 286 | Status alone insufficient — consult decisions endpoint |
+| `Institution Denied` | 258 | Status alone → label 0 |
+| `Final Written Decision - Appealed` | 92 | Status alone insufficient — consult decisions endpoint |
+| `Terminated` | 15 | Status alone → label 0 (procedural) |
+| `Terminated-Adverse Judgment` | 12 | Status alone → label 1 (patent-owner concession under 37 CFR § 42.73(b); claims are cancelled). ⚠ Subject to domain-expert review — see `../scope/prediction_scope.md` §3 / §7 sensitivity test. |
+| `Pending Director Review` | 2 | Pending — exclude |
+| `Terminated-Dismissed` | 1 | Procedural — label 0 |
+
+(Plus `Pending` and rarely `Trial Instituted` from broader sweeps. All three pending vocabularies are now in `config/labels.yaml::pending_statuses`.)
+
+**Why this means we still need `/trials/decisions/search`:** without it, every trial in the two FWD buckets above (~378 of 1000 in the 2022 sample, projecting to ~6,400 in the full IPR corpus) is unlabelable. Decisions = labels.
+
+### Resolution applied to `config/labels.yaml`
+
+- `pending_statuses` widened to `[Pending, Pending Director Review, Trial Instituted]` (was `[Trial Instituted]` only).
+- `non_fwd_label_0_statuses` extended with `Terminated-Dismissed`.
+- New top-level key `non_fwd_label_1_statuses: [Terminated-Adverse Judgment]`. `parse/preprocessing.py` now resolves the label by checking, in order: label-1-by-status, label-0-by-status, FWD verdict from the decisions side. Marked subject to domain-expert review in case the project's "what counts as cancelled?" definition diverges from the legal default.
+
 ## What this means for ingestion
 
 | Need | Endpoint | Why |

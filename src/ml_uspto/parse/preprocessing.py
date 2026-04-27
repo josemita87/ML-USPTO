@@ -21,6 +21,7 @@ from ml_uspto.schemas.constants import (
     ALL_CLAIMS_UNPATENTABLE_OUTCOMES,
     FWD_DECISION_TYPE_MARKER,
     NON_FWD_LABEL_0_STATUSES,
+    NON_FWD_LABEL_1_STATUSES,
     PENDING_STATUSES,
 )
 
@@ -82,6 +83,7 @@ def preprocess(
     df = df.merge(terminating, on="trial_number", how="left")
 
     label_zero_by_status = df["trial_status"].isin(NON_FWD_LABEL_0_STATUSES)
+    label_one_by_status = df["trial_status"].isin(NON_FWD_LABEL_1_STATUSES)
     label_one_by_outcome = df["terminating_outcome"].isin(
         ALL_CLAIMS_UNPATENTABLE_OUTCOMES
     )
@@ -90,6 +92,7 @@ def preprocess(
     # Status-based label-0 trials can't be label-1, but we keep the assignment
     # explicit so a future broadening of the outcome set can't silently leak.
     df.loc[label_zero_by_status, "cancelled"] = 0
+    df.loc[label_one_by_status, "cancelled"] = 1
 
     df = df.dropna(subset=["petition_filing_date", "patent_number"])
     df["technology_center"] = df["technology_center"].astype(str).str.strip()

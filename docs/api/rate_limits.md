@@ -64,6 +64,8 @@ Guidelines for ingestion scripts:
 - Cache responses to disk as you go (`data/raw/`) so a partial run can resume without re-hitting the API.
 - For bulk zips: download once, never re-download — the 20-per-year cap is hard.
 
+> ⚠ **`fileDownloadURI` PDFs require the `X-API-Key` header.** Empirical (2026-04-27): a stratified probe of 50 petition PDFs returned `403 Forbidden` for every URL when fetched with a bare `requests.get(uri)`. The same URLs returned 200 when fetched through `client.session.get(uri)`, which carries the `X-API-Key` header set in `USPTOClient.__init__`. The URL shape (`https://api.uspto.gov/api/v1/patent/ptab-files/IPR/...`) looks like a static asset path but goes through the same auth gate as the search APIs. **PDF download code must reuse the authenticated session — bare `requests` calls will silently fail.**
+
 ---
 
 ## 4. What to verify before a full pull

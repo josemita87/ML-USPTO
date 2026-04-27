@@ -24,13 +24,17 @@ All features must be **observable at T₀ or earlier**. This is the single invio
 
 | Terminating outcome | Label | Source |
 |---|---|---|
-| FWD — all challenged claims unpatentable | **1** | Terminating decision's outcome categorisation |
+| FWD — all challenged claims unpatentable | **1** | Terminating decision's `decisionData.trialOutcomeCategory` (decisions endpoint) |
 | FWD — any challenged claim survives | 0 | Same |
 | Institution denied | 0 | `trialStatusCategory == "Institution Denied"` |
 | Discretionary denial | 0 | `trialStatusCategory == "Discretionary Denial"` |
 | Terminated – settled | 0 | `trialStatusCategory == "Terminated-Settled"` |
 | Terminated – procedural | 0 | `trialStatusCategory == "Terminated"` (joinder, improper filing, etc.) |
-| Trial still pending | excluded | `trialStatusCategory == "Trial Instituted"` or similar in-progress states |
+| Terminated – dismissed | 0 | `trialStatusCategory == "Terminated-Dismissed"` (procedural) |
+| Terminated – adverse judgment | **1** | `trialStatusCategory == "Terminated-Adverse Judgment"` — patent owner concession under 37 CFR § 42.73(b); claims are cancelled. Configured in `config/labels.yaml::non_fwd_label_1_statuses`. ⚠ Subject to domain-expert review; revisit alongside the §7 settlement-coding sensitivity test if the "what counts as cancelled?" definition shifts. |
+| Trial still pending | excluded | `trialStatusCategory ∈ {"Pending", "Pending Director Review", "Trial Instituted"}` — all three vocabularies are now in `config/labels.yaml::pending_statuses`. |
+
+> ⚠ **`trialStatusCategory` does not carry the FWD verdict.** For FWD-reaching trials the proceedings endpoint stops at `Final Written Decision` or `Final Written Decision - Appealed` — neither value distinguishes "all claims unpatentable" from "mixed" or "all patentable". The verdict (label 1 vs 0 within FWD-reaching trials) is recoverable only from `decisionData.trialOutcomeCategory` on the decisions endpoint. Empirically this affects ~38% of terminated trials (286 + 92 of 1000 IPR2022 trials sampled) — see `../api/proceedings.md` "The proceedings status stops at FWD reached".
 
 The terminating decision is identified per trial as the FWD with the latest `decisionIssueDate` (so on a remand path, the remand FWD wins; the vacated original is not the label source).
 

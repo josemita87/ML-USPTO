@@ -1,23 +1,43 @@
 # Label-construction taxonomies for `ml_uspto.parse.preprocessing`.
 # These encode the §3 rules of `docs/scope/prediction_scope.md` as data so the
 # code stays stable when USPTO terminology shifts.
+#
+# Three layers of label resolution, applied in order in `preprocessing.py`:
+#   1. status ∈ non_fwd_label_1_statuses → label 1 (no decision lookup needed)
+#   2. status ∈ non_fwd_label_0_statuses → label 0 (no decision lookup needed)
+#   3. otherwise (FWD-reaching trials) → label depends on the decision-side
+#      `trialOutcomeCategory` (see `all_claims_unpatentable_outcomes`).
 
-# trialStatusCategory values that resolve directly to label-0 without
-# inspecting the decision side.
+# trialStatusCategory values that map directly to label 1 without inspecting
+# the decision side. Adverse judgment is patent-owner concession (37 CFR
+# § 42.73(b)); the practical effect is that the challenged claims are cancelled,
+# functionally equivalent to "all claims unpatentable".
+# ⚠ Subject to domain-expert review — see `docs/scope/prediction_scope.md` §3.
+non_fwd_label_1_statuses:
+  - Terminated-Adverse Judgment
+
+# trialStatusCategory values that resolve directly to label 0 without
+# inspecting the decision side. Sourced from §3 table in prediction_scope.md
+# plus the empirical taxonomy in `docs/api/proceedings.md`.
 non_fwd_label_0_statuses:
   - Institution Denied
   - Discretionary Denial
   - Terminated-Settled
   - Terminated  # procedural — joinder, improper filing, etc.
+  - Terminated-Dismissed  # procedural
 
 # trialStatusCategory values that mean the trial is still in progress —
-# we don't have a terminating outcome yet, so exclude.
+# we don't have a terminating outcome yet, so exclude. Empirically the API
+# uses `Pending` and `Pending Director Review` for in-flight trials;
+# `Trial Instituted` also appears (~351 cases corpus-wide as of 2026-04-24).
 pending_statuses:
+  - Pending
+  - Pending Director Review
   - Trial Instituted
 
-# Substring used to identify a Final Written Decision row in
-# decisionTypeCategory. Matches both the original FWD and any remand FWD
-# (e.g., "Final Written Decision On CAFC Remand", IPR2022-01002).
+# decisionTypeCategory substring that identifies a Final Written Decision
+# row. Matches both the original FWD and any remand FWD ("Final Written
+# Decision On CAFC Remand" was observed in IPR2022-01002).
 fwd_decision_type_marker: Final Written Decision
 
 # trialOutcomeCategory values from the *terminating* FWD that map to label 1.
