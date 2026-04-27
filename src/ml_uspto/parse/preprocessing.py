@@ -8,42 +8,23 @@ survived) is 0. Trials still pending are excluded entirely.
 The terminating FWD is identified per trial as the latest `decisionIssueDate`
 among rows whose `decision_type` indicates a Final Written Decision (this
 correctly handles remand: a remand FWD wins over the vacated original).
+
+Status/outcome taxonomies live in `config/labels.yaml` and are exposed via
+`ml_uspto.schemas.constants` so they can be revised without code changes.
 """
 
 import logging
 
 import pandas as pd
 
+from ml_uspto.schemas.constants import (
+    ALL_CLAIMS_UNPATENTABLE_OUTCOMES,
+    FWD_DECISION_TYPE_MARKER,
+    NON_FWD_LABEL_0_STATUSES,
+    PENDING_STATUSES,
+)
+
 logger = logging.getLogger(__name__)
-
-# trialStatusCategory values that resolve directly to label-0 without
-# inspecting the decision side. Sourced from §3 table in prediction_scope.md.
-NON_FWD_LABEL_0_STATUSES = {
-    "Institution Denied",
-    "Discretionary Denial",
-    "Terminated-Settled",
-    "Terminated",  # procedural — joinder, improper filing, etc.
-}
-
-# trialStatusCategory values that mean the trial is still in progress —
-# we don't have a terminating outcome yet, so exclude.
-PENDING_STATUSES = {
-    "Trial Instituted",
-    # Add other in-progress states here as the data surfaces them.
-}
-
-# decisionTypeCategory substrings that identify a Final Written Decision row.
-# Matches both the original FWD and any remand FWD ("Final Written Decision
-# On CAFC Remand" was observed in IPR2022-01002).
-FWD_DECISION_TYPE_MARKER = "Final Written Decision"
-
-# trialOutcomeCategory values from the *terminating* FWD that map to label 1.
-# Verified values should be added as the corpus is explored. These strings
-# come from the USPTO ODP `trialOutcomeCategory` field on `decisionData`.
-ALL_CLAIMS_UNPATENTABLE_OUTCOMES = {
-    "All Challenged Claims Unpatentable",
-    # Add any equivalent phrasings discovered from real data here.
-}
 
 
 def _identify_terminating_fwd(decisions: pd.DataFrame) -> pd.DataFrame:

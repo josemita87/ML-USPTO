@@ -1,0 +1,29 @@
+# Declarative mapping from `/trials/proceedings` records to a flat row.
+# Keys are output column names; values are dotted paths into the record.
+# Consumed by `ml_uspto.parse.engine.flatten_records`.
+
+columns:
+  trial_number: trialNumber
+
+  # Trial metadata
+  trial_type: trialMetaData.trialTypeCode
+  trial_status: trialMetaData.trialStatusCategory
+  petition_filing_date: trialMetaData.petitionFilingDate
+  accorded_filing_date: trialMetaData.accordedFilingDate
+  institution_decision_date: trialMetaData.institutionDecisionDate
+  latest_decision_date: trialMetaData.latestDecisionDate
+  termination_date: trialMetaData.terminationDate
+
+  # Patent owner data
+  patent_number: patentOwnerData.patentNumber
+  owner_real_party: patentOwnerData.realPartyInInterestName
+  owner_counsel: patentOwnerData.counselName
+  grant_date: patentOwnerData.grantDate
+  group_art_unit: patentOwnerData.groupArtUnitNumber
+  technology_center: patentOwnerData.technologyCenterNumber
+  inventor_name: patentOwnerData.inventorName
+  application_number: patentOwnerData.applicationNumberText
+
+  # Petitioner data
+  petitioner_real_party: regularPetitionerData.realPartyInInterestName
+  petitioner_counsel: regularPetitionerData.counselName

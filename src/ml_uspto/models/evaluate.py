@@ -16,28 +16,30 @@ from sklearn.metrics import (
     roc_curve,
 )
 
+from ml_uspto.schemas.models import ModelMetrics
+
 logger = logging.getLogger(__name__)
 
 
 def evaluate_model(
     model, X_test: pd.DataFrame, y_test: pd.Series, model_name: str
-) -> dict:
+) -> ModelMetrics:
     """Compute metrics on the test set."""
     y_pred = model.predict(X_test)
     y_prob = model.predict_proba(X_test)[:, 1]
 
-    metrics = {
-        "model": model_name,
-        "accuracy": accuracy_score(y_test, y_pred),
-        "roc_auc": roc_auc_score(y_test, y_prob),
-        "classification_report": classification_report(y_test, y_pred, output_dict=True),
-    }
+    metrics = ModelMetrics(
+        model_name=model_name,
+        accuracy=accuracy_score(y_test, y_pred),
+        roc_auc=roc_auc_score(y_test, y_prob),
+        classification_report=classification_report(y_test, y_pred, output_dict=True),
+    )
 
     logger.info(
         "%s — Accuracy: %.4f, AUC: %.4f",
-        model_name,
-        metrics["accuracy"],
-        metrics["roc_auc"],
+        metrics.model_name,
+        metrics.accuracy,
+        metrics.roc_auc,
     )
     return metrics
 
@@ -113,7 +115,8 @@ def plot_feature_importance(
     logger.info("Feature importance plot saved to %s", output_path)
 
 
-def save_metrics(all_metrics: list[dict], output_path: Path) -> None:
+def save_metrics(all_metrics: list[ModelMetrics], output_path: Path) -> None:
+    payload = [m.model_dump() for m in all_metrics]
     with open(output_path, "w") as f:
-        json.dump(all_metrics, f, indent=2, default=str)
+        json.dump(payload, f, indent=2, default=str)
     logger.info("Metrics saved to %s", output_path)

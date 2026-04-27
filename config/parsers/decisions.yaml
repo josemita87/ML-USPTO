@@ -1,0 +1,17 @@
+# Declarative mapping from `/trials/decisions` records to a flat row.
+# Keys are output column names; values are dotted paths into the record.
+# Consumed by `ml_uspto.parse.engine.flatten_records`.
+
+columns:
+  trial_number: trialNumber
+
+  decision_issue_date: decisionData.decisionIssueDate
+  decision_type: decisionData.decisionTypeCategory
+  trial_outcome: decisionData.trialOutcomeCategory
+  statutes_and_rules: decisionData.statuteAndRuleBag
+
+  document_name: documentData.documentName
+  document_title: documentData.documentTitleText
+  document_type: documentData.documentTypeDescriptionText
+  document_filing_date: documentData.documentFilingDate
+  filing_party: documentData.filingPartyCategory
