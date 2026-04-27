@@ -1,6 +1,8 @@
 """Model training pipeline."""
 
 import logging
+from collections.abc import Callable
+from typing import Any
 
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
@@ -8,14 +10,16 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import cross_val_score, train_test_split
 from xgboost import XGBClassifier
 
+from ml_uspto.models.schemas.enums import ModelName
+
 logger = logging.getLogger(__name__)
 
-MODELS = {
-    "logistic_regression": lambda: LogisticRegression(max_iter=1000, random_state=42),
-    "random_forest": lambda: RandomForestClassifier(
+MODELS: dict[ModelName, Callable[[], Any]] = {
+    ModelName.LOGISTIC_REGRESSION: lambda: LogisticRegression(max_iter=1000, random_state=42),
+    ModelName.RANDOM_FOREST: lambda: RandomForestClassifier(
         n_estimators=200, max_depth=10, random_state=42, n_jobs=-1
     ),
-    "xgboost": lambda: XGBClassifier(
+    ModelName.XGBOOST: lambda: XGBClassifier(
         n_estimators=200,
         max_depth=6,
         learning_rate=0.1,
@@ -35,19 +39,15 @@ def split_data(
 def train_and_evaluate_cv(
     X_train: pd.DataFrame,
     y_train: pd.Series,
-    model_name: str = "xgboost",
+    model_name: ModelName = ModelName.XGBOOST,
     cv_folds: int = 5,
 ) -> tuple:
     """Train a model with cross-validation and return (model, cv_scores)."""
-    if model_name not in MODELS:
-        raise ValueError(f"Unknown model: {model_name}. Choose from {list(MODELS)}")
-
     model = MODELS[model_name]()
-    logger.info("Cross-validating %s with %d folds", model_name, cv_folds)
+    logger.info("Cross-validating %s with %d folds", model_name.value, cv_folds)
 
     scores = cross_val_score(model, X_train, y_train, cv=cv_folds, scoring="roc_auc")
-    logger.info("%s CV AUC: %.4f (+/- %.4f)", model_name, scores.mean(), scores.std())
+    logger.info("%s CV AUC: %.4f (+/- %.4f)", model_name.value, scores.mean(), scores.std())
 
-    # Fit on full training set
     model.fit(X_train, y_train)
     return model, scores

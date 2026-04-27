@@ -1,6 +1,7 @@
 """Smoke test for the declarative parser engine."""
 
 from ml_uspto.parse.engine import flatten, flatten_records, load_parser_config
+from ml_uspto.parse.schemas.enums import Parser
 
 
 def test_proceedings_parser_flattens_known_payload():
@@ -12,9 +13,9 @@ def test_proceedings_parser_flattens_known_payload():
             "regularPetitionerData": {"realPartyInInterestName": "Beta LLC"},
         }
     ]
-    df = flatten(records, "proceedings")
+    df = flatten(records, Parser.PROCEEDINGS)
 
-    assert list(df.columns) == list(load_parser_config("proceedings")["columns"])
+    assert list(df.columns) == list(load_parser_config(Parser.PROCEEDINGS)["columns"])
     row = df.iloc[0]
     assert row["trial_number"] == "IPR2026-00339"
     assert row["trial_type"] == "IPR"
@@ -22,6 +23,12 @@ def test_proceedings_parser_flattens_known_payload():
     assert row["patent_number"] == "10000000"
     assert row["technology_center"] == "2600"
     assert row["petitioner_real_party"] == "Beta LLC"
+
+
+def test_decisions_parser_loads():
+    cfg = load_parser_config(Parser.DECISIONS)
+    assert "trial_number" in cfg["columns"]
+    assert cfg["columns"]["decision_issue_date"] == "decisionData.decisionIssueDate"
 
 
 def test_missing_paths_become_none():

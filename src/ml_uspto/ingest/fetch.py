@@ -10,6 +10,7 @@ import pandas as pd
 
 from ml_uspto.clients.uspto import USPTOClient
 from ml_uspto.parse.engine import flatten
+from ml_uspto.parse.schemas.enums import Parser
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,7 @@ def fetch_ipr_proceedings(
         page_size=page_size,
         label="proceedings",
     )
-    return flatten(records, "proceedings")
+    return flatten(records, Parser.PROCEEDINGS)
 
 
 def fetch_ipr_decisions(
@@ -63,4 +64,4 @@ def fetch_ipr_decisions(
         page_size=page_size,
         label="decisions",
     )
-    return flatten(records, "decisions")
+    return flatten(records, Parser.DECISIONS)

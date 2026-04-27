@@ -1,0 +1,46 @@
+# Declarative mappings for USPTO PTAB API surfaces.
+# Top-level keys correspond to `ml_uspto.parse.schemas.enums.Parser`.
+# Inside each surface, `columns` maps an output column name to a dotted
+# path into the raw record. Consumed by `ml_uspto.parse.engine.flatten`.
+
+proceedings:
+  columns:
+    trial_number: trialNumber
+
+    # Trial metadata
+    trial_type: trialMetaData.trialTypeCode
+    trial_status: trialMetaData.trialStatusCategory
+    petition_filing_date: trialMetaData.petitionFilingDate
+    accorded_filing_date: trialMetaData.accordedFilingDate
+    institution_decision_date: trialMetaData.institutionDecisionDate
+    latest_decision_date: trialMetaData.latestDecisionDate
+    termination_date: trialMetaData.terminationDate
+
+    # Patent owner data
+    patent_number: patentOwnerData.patentNumber
+    owner_real_party: patentOwnerData.realPartyInInterestName
+    owner_counsel: patentOwnerData.counselName
+    grant_date: patentOwnerData.grantDate
+    group_art_unit: patentOwnerData.groupArtUnitNumber
+    technology_center: patentOwnerData.technologyCenterNumber
+    inventor_name: patentOwnerData.inventorName
+    application_number: patentOwnerData.applicationNumberText
+
+    # Petitioner data
+    petitioner_real_party: regularPetitionerData.realPartyInInterestName
+    petitioner_counsel: regularPetitionerData.counselName
+
+decisions:
+  columns:
+    trial_number: trialNumber
+
+    decision_issue_date: decisionData.decisionIssueDate
+    decision_type: decisionData.decisionTypeCategory
+    trial_outcome: decisionData.trialOutcomeCategory
+    statutes_and_rules: decisionData.statuteAndRuleBag
+
+    document_name: documentData.documentName
+    document_title: documentData.documentTitleText
+    document_type: documentData.documentTypeDescriptionText
+    document_filing_date: documentData.documentFilingDate
+    filing_party: documentData.filingPartyCategory

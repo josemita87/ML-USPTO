@@ -2,8 +2,8 @@
 
 Reads a YAML mapping (`{output_column: dotted.path.into.record}`) and
 flattens a list of nested JSON records into a flat DataFrame. New API
-surfaces are added by dropping a YAML file into `config/parsers/`, not by
-writing more `_flatten_*` functions.
+surfaces are added by appending a key to `config/parsers/patents.yaml`
+and a member to `Parser`, not by writing more `_flatten_*` functions.
 """
 
 from __future__ import annotations
@@ -15,17 +15,21 @@ from typing import Any
 import pandas as pd
 import yaml
 
+from ml_uspto.parse.schemas.enums import Parser
 from ml_uspto.settings import PROJECT_ROOT
 
-PARSERS_DIR = PROJECT_ROOT / "config" / "parsers"
+PARSERS_CONFIG_PATH = PROJECT_ROOT / "config" / "parsers" / "patents.yaml"
 
 
-@lru_cache(maxsize=None)
-def load_parser_config(name: str) -> dict[str, Any]:
-    """Load `config/parsers/<name>.yaml` and return the parsed dict."""
-    path = PARSERS_DIR / f"{name}.yaml"
-    with open(path) as f:
+@lru_cache(maxsize=1)
+def _load_all() -> dict[str, Any]:
+    with open(PARSERS_CONFIG_PATH) as f:
         return yaml.safe_load(f)
+
+
+def load_parser_config(parser: Parser) -> dict[str, Any]:
+    """Return the column-mapping dict for a single surface."""
+    return _load_all()[parser.value]
 
 
 def _get_path(obj: Any, path: str) -> Any:
@@ -45,9 +49,9 @@ def flatten_records(
     return pd.DataFrame(rows, columns=list(columns))
 
 
-def flatten(records: Iterable[Mapping[str, Any]], parser_name: str) -> pd.DataFrame:
-    """Convenience: load the named parser config and flatten in one call."""
-    return flatten_records(records, load_parser_config(parser_name))
+def flatten(records: Iterable[Mapping[str, Any]], parser: Parser) -> pd.DataFrame:
+    """Convenience: load the parser config for `parser` and flatten in one call."""
+    return flatten_records(records, load_parser_config(parser))
 
 
-__all__ = ["PARSERS_DIR", "flatten", "flatten_records", "load_parser_config"]
+__all__ = ["PARSERS_CONFIG_PATH", "flatten", "flatten_records", "load_parser_config"]
