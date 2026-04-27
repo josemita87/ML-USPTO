@@ -192,6 +192,24 @@ Three failure modes were observed in earlier picker versions and are now defende
 
 The full set of failure-mode fixtures lives in `tests/unit/test_petition_picker.py` — every example above is locked in as a regression test.
 
+## Petition PDF format — native text, no OCR required
+
+Stratified probe of 50 petitions across 2012, 2014, 2017, 2020, 2024 (10/year), 2026-04-27. For each picked petition: download via `documentData.fileDownloadURI`, extract text with `pdfplumber`, compute chars-per-page over the first 30 pages.
+
+| Year | native | quarantine | chars/page range |
+|---:|---:|---:|---|
+| 2012 | 8 | 2 | 1,253 – 2,320 |
+| 2014 | 10 | 0 | 1,119 – 1,568 |
+| 2017 | 9 | 1 | 1,052 – 1,462 |
+| 2020 | 9 | 1 | 1,081 – 1,338 |
+| 2024 | 10 | 0 | 886 – 1,444 |
+
+**46 / 46 successful downloads were native-text PDFs.** None fell below 800 chars/page; the threshold for "image PDF" is 100 chars/page (orders of magnitude separation, no borderline cases). Even the oldest 2012 cohort runs ~1,400 chars/page — USPTO has mandated e-filing of petitions since IPR's launch in 2012, and the empirical record matches.
+
+**Implication.** The text-feature pipeline can use a pure-Python parser (`pdfplumber` for layout-aware extraction, `pypdf` if speed becomes the constraint) **without an OCR fallback**. Quarantine any future image-PDF outliers rather than scaling up an OCR pipeline for a population we haven't observed. Re-run this probe on a larger stratified sample only if quarantine rates rise materially.
+
+**Ancillary finding — auth required for PDF URLs.** The `fileDownloadURI` URL shape (`https://api.uspto.gov/api/v1/patent/ptab-files/IPR/...`) looks like a static asset path but goes through the same `X-API-Key` gate as the search APIs. Bare `requests.get(uri)` returns 403 Forbidden for every petition; the authenticated `client.session.get(uri)` returns 200. PDF download code must reuse the authenticated session — see `rate_limits.md` §3.
+
 ## Ingestion implications
 
 Use both endpoints, with clear role separation:

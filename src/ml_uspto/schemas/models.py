@@ -162,3 +162,12 @@ class ModelMetrics(BaseModel):
     accuracy: float
     roc_auc: float
     classification_report: dict[str, Any]
+
+
+class AdmissibilityPartition(BaseModel):
+    """Outcome of partitioning a trial directory's documents by T0 admissibility."""
+
+    t0: str
+    n_admissible: int
+    n_excluded: int
+    pdfs_moved: int

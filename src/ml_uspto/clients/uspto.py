@@ -38,7 +38,7 @@ class USPTOClient:
         url = f"{self.base_url}/trials/proceedings/{trial_number}"
         return self._get(url)
 
-    def get_documents(self, trial_number: str) -> dict:
+    def get_trial_documents(self, trial_number: str) -> dict:
         url = f"{self.base_url}/trials/{trial_number}/documents"
         return self._get(url)
 
@@ -81,6 +81,42 @@ class USPTOClient:
         url = f"{self.base_url}/trials/decisions/search"
         body = self._build_body(q, filters, range_filters, fields, facets, sort, offset, limit)
         return self._post(url, body)
+
+    def search_documents_post(
+        self,
+        *,
+        q: str | None = None,
+        filters: list[dict] | None = None,
+        range_filters: list[dict] | None = None,
+        fields: list[str] | None = None,
+        facets: list[str] | None = None,
+        sort: list[dict] | None = None,
+        offset: int = 0,
+        limit: int = 100,
+    ) -> dict:
+        """Search documents via POST. POST-only endpoint (GET returns 404).
+
+        Returns rows under `patentTrialDocumentDataBag`. Each row carries
+        `documentData` (per-row, fresh — has `fileDownloadURI`),
+        `decisionData` (populated only on decision-type rows), and
+        `trialMetaData` (trial-level header, lagged — do not use as feature;
+        see `docs/api/proceedings.md`).
+        """
+        url = f"{self.base_url}/trials/documents/search"
+        body = self._build_body(q, filters, range_filters, fields, facets, sort, offset, limit)
+        return self._post(url, body)
+
+    def get_application(self, application_number: str) -> dict:
+        """Fetch the full patent file wrapper for one application.
+
+        Returns the union of all 7 sub-paths (`/transactions`, `/adjustment`,
+        `/continuity`, `/foreign-priority`, `/assignment`, `/attorney`,
+        `/documents`) in a single call. See `docs/api/patents.md`.
+        ⚠ `eventDataBag` carries `TRIALPET`/`TRIALGRT`/`TRIALFWD` — the label.
+        Always T₀-filter dated bags before aggregation.
+        """
+        url = f"{self.base_url}/applications/{application_number}"
+        return self._get(url)
 
     def download_decisions(
         self,

@@ -24,6 +24,7 @@ from ml_uspto.schemas.constants import (
     NON_FWD_LABEL_1_STATUSES,
     PENDING_STATUSES,
 )
+from ml_uspto.schemas.enums import TrialType
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,7 @@ def preprocess(
     """
     logger.info("Raw proceedings: %d", len(proceedings))
 
-    df = proceedings[proceedings["trial_type"] == "IPR"].copy()
+    df = proceedings[proceedings["trial_type"] == TrialType.IPR].copy()
     logger.info("After filtering to IPR: %d", len(df))
 
     df = df[~df["trial_status"].isin(PENDING_STATUSES)].copy()

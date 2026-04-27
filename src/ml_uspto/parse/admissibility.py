@@ -20,6 +20,8 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
+from ml_uspto.schemas.models import AdmissibilityPartition
+
 
 def is_admissible(record: Mapping[str, Any], t0: str) -> bool:
     fd = record.get("documentData", {}).get("documentFilingDate", "")
@@ -36,7 +38,7 @@ def partition_records(
     return admissible, excluded
 
 
-def partition_trial_dir(trial_dir: Path, t0: str | None = None) -> dict[str, Any]:
+def partition_trial_dir(trial_dir: Path, t0: str | None = None) -> AdmissibilityPartition:
     """Partition a trial directory's PDFs by admissibility.
 
     Reads `all_documents.json`, partitions records by T0, writes
@@ -77,16 +79,16 @@ def partition_trial_dir(trial_dir: Path, t0: str | None = None) -> dict[str, Any
                 shutil.move(str(pdf), str(excluded_dir / pdf.name))
                 moved += 1
 
-    return {
-        "t0": t0,
-        "n_admissible": len(admissible),
-        "n_excluded": len(excluded),
-        "pdfs_moved": moved,
-    }
+    return AdmissibilityPartition(
+        t0=t0,
+        n_admissible=len(admissible),
+        n_excluded=len(excluded),
+        pdfs_moved=moved,
+    )
 
 
 if __name__ == "__main__":
     import sys
 
     result = partition_trial_dir(Path(sys.argv[1]))
-    print(json.dumps(result, indent=2))
+    print(result.model_dump_json(indent=2))

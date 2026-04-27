@@ -149,10 +149,11 @@ The corpus-wide `documentCategory: "PETITION"` filter only catches ~6K of the ~1
 | Corpus-wide petition scan — `POST /trials/documents/search` filtered to `documentCategory IN ["PETITION", "Paper"]`, paginated 100/page | ~3K calls (~301K rows fetched, ~18K kept after `pick_petition()`) | Metadata (5M/wk) | ~5 min serial |
 | Per-trial fallback for picker quarantine (~1.3% of trials) | ~230 calls | Metadata (5M/wk) | ~1 min |
 | Optional FWD label cross-check — `POST /trials/documents/search` filtered to `documentCategory: "FINAL"` | ~20 calls | Metadata (5M/wk) | ~5 s |
-| Petition PDF downloads | ~18K, **~4–5 GB** | File-Wrapper Documents (1.2M/wk) | ~30 min |
+| Petition PDF downloads | ~18K, **~70 GB raw / ~2 GB extracted text** | File-Wrapper Documents (1.2M/wk) | **~10 h** |
+| Patent file-wrapper enrichment — `GET /applications/{appNum}` per unique app | ~10–13K calls | Patent metadata bucket | ~3–4 h |
 | Bulk: `PASDL` + `PTMNFEE2` + `PTFWPRE` | 3 products, ~70 GB | Bulk (20/file/yr) | one-time |
 
-Total live-API wall-clock: **~35 min**, dominated by PDF downloads. Both buckets sit comfortably inside the 5M/wk metadata cap and the 1.2M/wk file-wrapper cap. Storage dominated by `PTFWPRE` (~63 GB); petition PDFs are ~4–5 GB. **This table is canonical for this project — `../api/rate_limits.md` §2 and `../api/api_feature_map.md` §5 defer to it.**
+Total live-API wall-clock: **~13–14 h**, dominated by petition PDF downloads. The 30-min PDF estimate in earlier drafts of this section was wrong — empirical probe (2026-04-27) measured ~5.7 s per (search + download) call and pure download alone at ~2 s/petition; serial × 18K = ~10 h, not 30 min. Both API buckets sit comfortably inside the 5M/wk metadata cap and the 1.2M/wk file-wrapper cap; the binding constraint is wall-clock from burst=1 serialization, not quota. Storage: ~70 GB raw petition PDFs **kept on local FS only** (never pushed to S3 — 70 GB > AWS free-tier 5 GB cap); ~2 GB compressed extracted text + ~50 MB feature parquets pushed to S3. PDFs are re-downloadable from `fileDownloadURI` so they can be deleted after extraction if local disk pressure builds. **This table is canonical for this project — `../api/rate_limits.md` §2 and `../api/api_feature_map.md` §5 defer to it.**
 
 ### 5.5 Train / test symmetry
 
