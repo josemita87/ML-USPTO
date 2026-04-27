@@ -91,7 +91,7 @@ flowchart LR
 
 **Disallowed sources** (any of these leaks):
 - Everything in `decisionData` for any decision in this trial.
-- `institutionDecisionDate`, `terminationDate`, `latestDecisionDate`.
+- `institutionDecisionDate`, `terminationDate`, `latestDecisionDate`, `trialStatusCategory` — *from any source*. **Including the petition document row.** The `trialMetaData` block on a document row is the trial-level header denormalized at indexing time, refreshed on a separate cadence from the proceedings endpoint. It is NOT frozen at T₀ — for older or recently-touched trials it can carry the live trial state. See `../api/proceedings.md` "What we observed" for the empirical lag table. Treat document-row `trialMetaData` as off-limits; pull all label/state fields from `proceedings/search`.
 - Preliminary Response (POPR), Patent Owner Response (POR), Petitioner Reply, Sur-Reply — text and metadata.
 - Any paper with `documentFilingDate > T₀`. The exception is papers bundled *with* the petition (Power of Attorney, Mandatory Notice when co-filed, exhibits 1xxx) — these have `documentFilingDate == T₀` and are admissible.
 - CAFC outcomes (`appealOutcomeCategory`, mandate dates).
@@ -121,7 +121,7 @@ We open exactly one PDF per trial: the petition (Paper 3), plus optionally a sma
 
 Retrieval path:
 1. **Trial inventory + label** — `POST /trials/proceedings/search` paginated, filtered to `trialMetaData.trialTypeCode: "IPR"`. One row per trial with live `trialStatusCategory`, `terminationDate`, etc.
-2. **Per-trial petition row** — for each trial, `POST /trials/documents/search` with `filters: [{name: "trialNumber", value: [<trial>]}]`, paginated. Run the petition picker (see `../api/proceedings.md` "Petition coverage and the category-taxonomy drift") to identify the petition row from its document-list. The picker handles both the new `documentCategory: "PETITION"` taxonomy and the legacy `Paper` catch-all bucket. Each picked row carries the petition document's `documentData` (including `fileDownloadURI`) plus a **header frozen at T₀** (`trialMetaData`, `patentOwnerData`, `regularPetitionerData`) — a leakage-discipline win because post-T₀ fields like `terminationDate` are simply absent on petition rows.
+2. **Per-trial petition row** — for each trial, `POST /trials/documents/search` with `filters: [{name: "trialNumber", value: [<trial>]}]`, paginated. Run the petition picker (see `../api/proceedings.md` "Petition coverage and the category-taxonomy drift") to identify the petition row from its document-list. The picker handles both the new `documentCategory: "PETITION"` taxonomy and the legacy `Paper` catch-all bucket. Use **only `documentData.*`** from the picked row — `fileDownloadURI` (for the PDF), `documentFilingDate` (= T₀), `documentNumber`, `documentTitleText`. The `trialMetaData` block on this row is **not** frozen at T₀ (refer to `../api/proceedings.md` "What we observed"); it is the live trial header lagged by the documents-endpoint indexer cadence and may carry post-T₀ values. All trial / patent / party features come from the proceedings row in step 1, not from this row.
 3. **PDF download** — `GET <documentData.fileDownloadURI>` from the picked row.
 
 ### 5.3 Patent file wrapper bulk products become first-tier
@@ -137,17 +137,18 @@ Download-once-cache-locally discipline applies (the 20-per-file-per-year bulk ca
 
 ### 5.4 Cost model (canonical for this scope)
 
-The corpus-wide `documentCategory: "PETITION"` filter only catches ~6K of the ~18K IPR trials, because pre-2022 trials use the legacy `Paper` category (which is also a catch-all for all procedural papers). The actually-correct ingestion path is **one per-trial documents/search call** (validated empirically at 100% recall — see `../api/proceedings.md`).
+The corpus-wide `documentCategory: "PETITION"` filter only catches ~6K of the ~18K IPR trials, because pre-2022 trials use the legacy `Paper` category (which is also a catch-all for all procedural papers). The canonical ingestion path is a **single corpus-wide scan filtered to `documentCategory IN ["PETITION", "Paper"]`** with the picker applied per trial — validated empirically at 98.7% recall, 0 false positives across 239 stratified trials (see `../api/proceedings.md`). The earlier per-trial draft (18K calls) is superseded by the corpus-wide scan (~3K calls) — same coverage, ~6× fewer requests.
 
 | Pass | Calls / size | Bucket | Wall time |
 |---|---:|---|---|
 | Trial inventory + label — `POST /trials/proceedings/search` paginated | ~200 calls | Metadata (5M/wk) | ~30 s |
-| Per-trial documents enumeration + petition picker — `POST /trials/documents/search` filtered by `trialNumber` | ~18K calls (1 per trial; most trials fit in one page of 100 docs) | Metadata (5M/wk) | ~30 min serial, less with parallelism |
+| Corpus-wide petition scan — `POST /trials/documents/search` filtered to `documentCategory IN ["PETITION", "Paper"]`, paginated 100/page | ~3K calls (~301K rows fetched, ~18K kept after `pick_petition()`) | Metadata (5M/wk) | ~5 min serial |
+| Per-trial fallback for picker quarantine (~1.3% of trials) | ~230 calls | Metadata (5M/wk) | ~1 min |
 | Optional FWD label cross-check — `POST /trials/documents/search` filtered to `documentCategory: "FINAL"` | ~20 calls | Metadata (5M/wk) | ~5 s |
 | Petition PDF downloads | ~18K, **~4–5 GB** | File-Wrapper Documents (1.2M/wk) | ~30 min |
 | Bulk: `PASDL` + `PTMNFEE2` + `PTFWPRE` | 3 products, ~70 GB | Bulk (20/file/yr) | one-time |
 
-Total live-API wall-clock: **~60 min**, split roughly evenly between per-trial document enumeration and PDF downloads. Both fit comfortably inside the 5M/wk metadata bucket and the 1.2M/wk file-wrapper bucket. Storage dominated by `PTFWPRE` (~63 GB); petition PDFs are ~4–5 GB. **This table is canonical for this project — `../api/rate_limits.md` §2 and `../api/api_feature_map.md` §5 defer to it.**
+Total live-API wall-clock: **~35 min**, dominated by PDF downloads. Both buckets sit comfortably inside the 5M/wk metadata cap and the 1.2M/wk file-wrapper cap. Storage dominated by `PTFWPRE` (~63 GB); petition PDFs are ~4–5 GB. **This table is canonical for this project — `../api/rate_limits.md` §2 and `../api/api_feature_map.md` §5 defer to it.**
 
 ### 5.5 Train / test symmetry
 
@@ -157,10 +158,10 @@ Every feature is observable at T₀, so training and inference paths are identic
 
 Each feature column in the modelling matrix should declare its provenance: which source produced it and what date that source is anchored to relative to T₀. The pipeline should reject columns that can't prove they're ≤ T₀.
 
-The two metadata sources differ on how leakage-resistant they are out of the box:
+Neither endpoint enforces leakage discipline for us — the API has no T₀-frozen view. Both endpoints return the trial header as denormalized state at indexing time:
 
-- **`documents/search` filtered to PETITION rows** — header is **frozen at T₀**. Post-T₀ mutable fields like `terminationDate` and `institutionDecisionDate` are simply absent on these rows (verified empirically 2026-04-26). Use this as the primary feature snapshot; the API itself enforces the leakage discipline.
-- **`proceedings/search`** — header is **live**. The same JSON object mixes admissible fields (`petitionFilingDate`, `accordedFilingDate`, static patent / party blocks) with post-T₀ fields (`trialStatusCategory`, `terminationDate`, `institutionDecisionDate`, `latestDecisionDate`). Use only for the label, never for features without an explicit field-level allowlist.
+- **`proceedings/search`** — refreshed within days of every trial event. The JSON object mixes admissible fields (`petitionFilingDate`, `accordedFilingDate`, static patent / party blocks) with post-T₀ fields (`trialStatusCategory`, `terminationDate`, `institutionDecisionDate`, `latestDecisionDate`). Use for the label and for an **explicit field-level allowlist** of static / pre-T₀ fields; never for the post-T₀ fields above.
+- **`documents/search` (petition row)** — `trialMetaData` is the same trial-level header but refreshed by a *separate*, slower indexer. For older / recently-touched trials the petition row carries fully post-T₀ status and dates (e.g., IPR2022-01002's petition row reads `Final Written Decision - Appealed`). Earlier drafts of this scope claimed this row was "frozen at T₀" — that was wrong, based on a 6-trial sample of recent trials whose documents-side lag *happened* to keep the stamp near T₀. **Use only `documentData.*` from the petition row** (`fileDownloadURI`, `documentFilingDate`, `documentNumber`, `documentTitleText`); ignore `trialMetaData`. See `../api/proceedings.md` "What we observed" for the empirical lag table.
 
 ## 6. Document map (what each doc owns)
 
