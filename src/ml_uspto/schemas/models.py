@@ -10,6 +10,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from ml_uspto.schemas.enums import QuarantineReason
+
 # ---------------------------------------------------------------------------
 # /trials/proceedings
 # ---------------------------------------------------------------------------
@@ -203,7 +205,7 @@ class QuarantineEntry(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     trial_number: str
-    reason: str
+    reason: QuarantineReason
     n_candidates: int
     sample_titles: list[str] = Field(default_factory=list)
 

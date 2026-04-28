@@ -30,3 +30,10 @@ class TrialOutcome(StrEnum):
     """Observed values of `decisionData.trialOutcomeCategory` on FWDs."""
 
     ALL_CHALLENGED_CLAIMS_UNPATENTABLE = "All Challenged Claims Unpatentable"
+
+
+class QuarantineReason(StrEnum):
+    """Why a trial failed petition assembly. Emitted in `QuarantineEntry.reason`."""
+
+    PICKER_NO_MATCH = "picker_no_match"  # picker ran but rejected every candidate
+    NO_DOCUMENTS = "no_documents"        # trial absent from documents/search corpus

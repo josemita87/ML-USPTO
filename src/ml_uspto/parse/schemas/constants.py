@@ -24,3 +24,4 @@ PETITION_TITLE: re.Pattern[str] = re.compile("|".join(_cfg["title_alternatives"]
 BLACKLIST: re.Pattern[str] = re.compile("|".join(_cfg["blacklist_alternatives"]), re.I)
 PAPER_NUMBER_CEILING: int = _cfg["paper_number_ceiling"]
 EXHIBIT_CATEGORIES: frozenset[str] = frozenset(_cfg["exhibit_categories"])
+QUARANTINE_SAMPLE_TITLES_LIMIT: int = _cfg["quarantine"]["sample_titles_limit"]

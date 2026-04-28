@@ -70,6 +70,7 @@ def test_proceeding_ignores_unknown_fields():
 
 from datetime import datetime
 
+from ml_uspto.schemas.enums import QuarantineReason
 from ml_uspto.schemas.models import (
     JoinedTrial,
     Patent,
@@ -94,7 +95,11 @@ def test_petition_minimal_construction():
 
 
 def test_quarantine_entry_default_sample_titles_is_empty():
-    q = QuarantineEntry(trial_number="IPR2014-00999", reason="no_match", n_candidates=0)
+    q = QuarantineEntry(
+        trial_number="IPR2014-00999",
+        reason=QuarantineReason.PICKER_NO_MATCH,
+        n_candidates=0,
+    )
     assert q.sample_titles == []
 
 

@@ -35,3 +35,10 @@ paper_number_ceiling: 10
 exhibit_categories:
   - exhibit
   - exhibits
+
+# Stage 2 quarantine output. Consumed by `parse.petition_assembler`.
+quarantine:
+  # How many candidate-row titles to attach to a `picker_no_match` entry to
+  # aid manual triage. Five is enough to spot the pattern (corrected
+  # petitions, exotic phrasings, etc.) without bloating the parquet.
+  sample_titles_limit: 5
