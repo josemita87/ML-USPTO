@@ -17,7 +17,7 @@ features:
   # Days-based features are computed relative to petition filing date
   date_features: true
   technology_center_encoding: "onehot"
-  text_features: false  # Set true to extract basic text stats from decisions
+  text_features: false  # Set true to extract basic text stats from petitions (decisions are post-T₀ and excluded — see docs/scope/prediction_scope.md §5.1)
 
 model:
   test_size: 0.2

@@ -275,6 +275,10 @@ Removing these from the read pipeline saves ~31.6 MB / trial × 18K trials ≈ *
 
 This is before joining the patent-side bulk products (PASDL, PTMNFEE2, PTFWPRE) which add file-wrapper, assignment, and maintenance-fee features per `patent_file_wrapper_features.md`.
 
+### v1 implementation subset
+
+`PetitionTextFeatures` in `src/ml_uspto/schemas/models.py` (PR 1) defines **~13 fields** — the core structural counts (word count, page count, claims challenged, grounds, exhibits, prior-art refs, expert declarations) and the highest-signal Tier-1 statutory/procedural booleans (n_grounds_102, n_grounds_103, has_sotera_stipulation, mentions_fintiv_factors, discloses_prior_iprs_same_patent, n_real_parties_in_interest, claim_construction_disputed_terms). The remaining ~40 features in this catalog (ranking-notice fields, prior-art exhibit-list derivations like `npl_share` / `mean_reference_age_at_critical_date`, finer §IV / §VI.B substructure) are deferred to v2 — schema-additive, no breaking change. NLP / embeddings on petition text (Tier 3 in `docs/plans/2026-04-27-ingestion-pipeline.md` §1) are explicitly out of scope for v1.
+
 ---
 
 ## 9. What this means for ingestion

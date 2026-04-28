@@ -78,10 +78,11 @@ Each IPR petition generates ~$40-50K in filing fees that the USPTO retains regar
 
 ## Document Structure and Consistency
 
-- Institution decisions addressing Fintiv follow a formulaic structure with explicit per-factor headings
-- All PTAB documents are OCR'd with consistent formatting
-- IPR petitions have a two-part structure: procedural arguments (short, ~2-3 pages) and substantive arguments (bulk of document)
-- The full case record follows a consistent ordering: petition -> preliminary response -> institution decision -> scheduling order -> briefs -> oral argument -> final written decision
+- IPR petitions have a regulated structure (37 CFR §42.104): mandatory notices §VI, grounds §I.B, claim construction §II, prior-art mapping §III, discretionary considerations §IV, certification footer §42.24. Section anchors are reliable parser landmarks.
+- Two-part substance: procedural arguments (short, ~2–3 pages, §IV) and substantive arguments (bulk of document, §III).
+- All PTAB documents are OCR'd with consistent formatting.
+- Institution decisions also follow a formulaic structure with explicit per-Fintiv-factor headings — relevant for **ground-truth label extraction in evaluation only**, since the institution decision is post-T₀ and excluded as a feature source per `prediction_scope.md` §4.
+- The full case record follows a consistent ordering: petition → preliminary response → institution decision → scheduling order → briefs → oral argument → final written decision. Only the petition is read for features.
 
 ## Competitive Landscape
 
@@ -93,12 +94,15 @@ Each IPR petition generates ~$40-50K in filing fees that the USPTO retains regar
 
 ## Feature Engineering Priorities
 
-1. **Binary flags**: Fintiv (Y/N), 325(d) (Y/N), Sotera stipulation (Y/N)
-2. **Ordinal factor ratings**: 5-point scale per Fintiv sub-factor
-3. **Temporal features**: Filing date, decision date, policy regime indicator
-4. **Metadata**: Technology center, patent age, counsel identity
-5. **Document-level features**: Discretionary denial section length, prior art count
-6. **Dispositive factor identification**: Which factor drove the outcome
+All features must be observable at T₀ (petition filing) — see `prediction_scope.md` §4. Priorities:
+
+1. **Petition binary flags**: Fintiv addressed (Y/N), 325(d) addressed (Y/N), Sotera stipulation present (Y/N) — all from petition §IV
+2. **Petition counts**: claims challenged, prior-art references, exhibits, expert declarations, grounds (102/103) — from §I.B grounds table + exhibit list
+3. **Temporal features**: petition filing date, policy-regime indicator (decision date is post-T₀ and excluded)
+4. **Patent metadata**: technology center, patent age, counsel identity, NPE flag (assignment chain)
+5. **Document-level features**: §IV section length, §I.B grounds-table density, §42.24 word-count utilization
+
+The judge's per-factor Fintiv ratings and the dispositive factor are **excluded** as features (post-T₀ via institution decision); they remain available only as ground-truth labels for evaluation — see `ptab_scope_and_terminology.md` §5.4.
 
 ## Data Notes
 

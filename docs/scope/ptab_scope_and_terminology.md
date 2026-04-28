@@ -15,8 +15,8 @@ These three terms are often used interchangeably in casual conversation but sit 
 | **Appeal** | Usually refers to **ex parte appeals** — appeals from an examiner's rejection during patent *prosecution* (before grant). Handled by PTAB but **not AIA trials**: no petitioner/patent-owner structure, no Fintiv, no institution gate. Separately, an FWD in an IPR can be appealed *out of* PTAB to the Federal Circuit (CAFC) — that is an appeal out of PTAB, not a PTAB proceeding. | N/A for this project | Out of scope — not modeled |
 
 **Implication for the pipeline:**
-- Proceedings = rows and the source of the target label.
-- Decisions = where most institution-stage features (Fintiv, 325(d), dispositive factor) come from.
+- Proceedings = rows and the source of the target label (plus all static `trialMetaData` / party / patent fields ≤ T₀).
+- Decisions = label-only. The institution decision and FWD are post-T₀ and **excluded as feature sources** (`prediction_scope.md` §4). Institution-stage signals (Fintiv, 325(d), Sotera) are extracted from the *petition's* §IV at T₀ — see §5 below.
 - Appeals = filter out; they are a different proceeding category entirely.
 
 ### CAFC appeals — label handling, not a filter

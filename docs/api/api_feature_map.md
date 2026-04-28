@@ -129,13 +129,13 @@ The decisions endpoint is a **filtered subset of documents/search**, restricted 
 | 2 | Decision-side structured | `statuteAndRuleBag` (e.g. `35 USC 325` for 325(d)) | documents/search filtered to `FINAL` (or decisions POST) | `decisionData.statuteAndRuleBag` | **Out of scope as feature** (§4 leakage). Available for label-set debugging only. |
 | 2 | Decision-side structured | `issueTypeBag` (102/103/112 actually addressed by judges) | documents/search filtered to `FINAL` (or decisions POST) | `decisionData.issueTypeBag` | **Out of scope as feature** (§4 leakage). Useful for evaluating extraction accuracy of feature 1 above. |
 | 2 | Decision PDF text | Fintiv factor ratings, dispositive factor | decision PDF | Full text → LLM/regex over per-factor headings | **Out of scope** (§4 leakage). Available for ground-truth Fintiv labels in evaluation only — see `../scope/ptab_scope_and_terminology.md` §5.4. |
-| 3 | Temporal / regime | Petition filing date (T₀ itself) | documents/search | `trialMetaData.petitionFilingDate`, `trialMetaData.accordedFilingDate` | **In scope.** |
-| 3 | Temporal / regime | Policy-era indicator | documents/search (derived) | Bucketed from `petitionFilingDate` per regime table in `../scope/domain_notes.md` | **In scope.** Strong macro predictor. |
+| 3 | Temporal / regime | Petition filing date (T₀ itself) | proceedings/search | `trialMetaData.petitionFilingDate`, `trialMetaData.accordedFilingDate` | **In scope.** |
+| 3 | Temporal / regime | Policy-era indicator | proceedings/search (derived) | Bucketed from `petitionFilingDate` per regime table in `../scope/domain_notes.md` | **In scope.** Strong macro predictor. |
 | 3 | Temporal / regime | Institution decision date | proceedings/search (live) | `trialMetaData.institutionDecisionDate` | **Out of scope** (§4 leakage). Strictly label-side; do not pull from any source as a feature. |
-| 4 | Metadata | Technology center / group art unit | documents/search | `patentOwnerData.technologyCenterNumber`, `patentOwnerData.groupArtUnitNumber` | **In scope.** |
-| 4 | Metadata | Patent age at petition | documents/search (derived) | `petitionFilingDate` − `patentOwnerData.grantDate` | **In scope.** |
-| 4 | Metadata | Counsel identity (petitioner / owner) | documents/search + petition | `regularPetitionerData.counselName`, `patentOwnerData.counselName`; richer detail from petition §VI.C | **In scope.** Free text — needs normalization. |
-| 4 | Metadata | Real parties in interest | documents/search + petition §VI.A | `regularPetitionerData.realPartyInInterestName`, `patentOwnerData.realPartyInInterestName`; the API field truncates joinder to the lead petitioner — petition §VI.A is authoritative | **In scope.** |
+| 4 | Metadata | Technology center / group art unit | proceedings/search | `patentOwnerData.technologyCenterNumber`, `patentOwnerData.groupArtUnitNumber` | **In scope.** |
+| 4 | Metadata | Patent age at petition | proceedings/search (derived) | `petitionFilingDate` − `patentOwnerData.grantDate` | **In scope.** |
+| 4 | Metadata | Counsel identity (petitioner / owner) | proceedings/search + petition | `regularPetitionerData.counselName`, `patentOwnerData.counselName`; richer detail from petition §VI.C | **In scope.** Free text — needs normalization. |
+| 4 | Metadata | Real parties in interest | proceedings/search + petition §VI.A | `regularPetitionerData.realPartyInInterestName`, `patentOwnerData.realPartyInInterestName`; the API field truncates joinder to the lead petitioner — petition §VI.A is authoritative | **In scope.** |
 | 5 | Petition-text structural | Petition word count + utilization | **petition PDF** | §42.24 certification footer | **In scope.** |
 | 5 | Petition-text structural | Prior-art reference count + classification | **petition PDF** | Petition exhibit list | **In scope.** Full taxonomy in `../features/admissible_documents_analysis.md` §6.1. |
 

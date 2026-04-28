@@ -197,7 +197,7 @@ The decisions endpoint returns exactly 3 records for this trial, each carrying s
 | 48 | 2026-02-20 | `Vacated/Remanded` | — | — | CAFC mandate landed; PTAB records it as a decision-type paper but no statute/issue tagging |
 | 52 | 2026-04-22 | `Final Written Decision On CAFC Remand` | `[102, 103]` | `[37 CFR 42.100, 37 CFR 42.73, 35 USC 311, 35 USC 318]` | FWD on remand — now both **anticipation** and **obviousness** addressed (CAFC apparently directed the Board to consider 102 grounds it had skipped) |
 
-This is exactly the shape the model needs: every meaningful Board decision is a row in the decisions endpoint with structured outcome + grounds tags, no PDF parsing required for these features. The only thing the structured fields *don't* tell us is the *reasoning* — for Fintiv-factor ratings or dispositive-factor identification, the FWD PDF (Paper 41 or 52) must be parsed.
+This is exactly the shape the **label assembly** needs: every meaningful Board decision is a row in the decisions endpoint with structured outcome + grounds tags, so the binary cancellation label is recoverable from `decisionData.trialOutcomeCategory` alone — no PDF parsing required. The structured fields don't carry the *reasoning* (Fintiv per-factor ratings, dispositive factor); under the current scope those would require parsing the FWD PDF, which is post-T₀ and excluded as a feature source per `../scope/prediction_scope.md` §4. The institution-decision and FWD PDFs remain available for *evaluation*-only ground-truth Fintiv labelling.
 
 ---
 

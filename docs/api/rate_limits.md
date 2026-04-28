@@ -46,7 +46,7 @@ These apply to **every** request regardless of bucket:
 
 Serial-only. At ~10 req/sec sequential, the binding constraint is **wall-clock time from burst=1 serialization, not quota**.
 
-For the canonical cost model under the current scope, see **`../scope/prediction_scope.md` §5.4**. Summary: total live-API wall-clock ≈ 60 min; petition PDFs are now the only PDFs we fetch (~4–5 GB), and decision PDFs have been cut as a feature source per `../scope/prediction_scope.md` §5.1. Earlier tables in this doc estimated ~25K decision PDF fetches; that pass no longer runs.
+For the canonical cost model under the current scope, see **`../scope/prediction_scope.md` §5.4**. Summary: total live-API wall-clock ≈ **13–14 h**, dominated by ~10 h of petition PDF downloads at ~2 s/PDF × ~18K trials. Petition PDFs are now the only PDFs we fetch (~70 GB raw / ~2 GB extracted text), and decision PDFs have been cut as a feature source per `../scope/prediction_scope.md` §5.1. Earlier drafts estimated ~25K decision PDF fetches and a ~60 min total — both reflected the pre-cut pipeline and are superseded.
 
 ---
 

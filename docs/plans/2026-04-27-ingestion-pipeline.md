@@ -64,8 +64,8 @@ STAGE 2  Petition discovery (corpus-wide scan)             ~5 min
   call: POST /trials/documents/search
         filter documentCategory IN ["PETITION","Paper"]   ~3K calls, ~301K rows
   parse: group by trialNumber → pick_petition() per group
-  out:  data/processed/petitions.parquet                   (~17.7K rows)
-        data/processed/petition_quarantine.parquet         (~230 rows)
+  out:  data/processed/petitions.parquet                   (~17.8K rows = 18,058 IPRs minus ~230 quarantine)
+        data/processed/petition_quarantine.parquet         (~230 rows; ~1.3% of trials)
 
 STAGE 3  Patent enrichment (per unique application)        ~3–4 h
   call: GET /applications/{appNum}            ~10–13K calls (dedup by app)
