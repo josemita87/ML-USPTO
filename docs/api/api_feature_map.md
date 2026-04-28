@@ -9,7 +9,7 @@ Client code: `src/ml_uspto/clients/uspto.py`. The proceedings endpoint and the d
 **Authoritative API references**:
 - Swagger UI / OpenAPI spec: <https://data.uspto.gov/swagger/index.html> — endpoint paths, request parameters, response body schemas.
 - Query syntax reference: `ODP-API-Query-Spec.pdf` (in this directory).
-- Empirical-probing note: per `feedback_empirical_over_spec` memory, prefer hitting endpoints with the live client to confirm real response shape before coding to the spec — Swagger examples include synthetic placeholder data.
+- Empirical-probing note: prefer hitting endpoints with the live client to confirm real response shape before coding to the spec — Swagger examples include synthetic placeholder data.
 
 ---
 

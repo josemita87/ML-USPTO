@@ -190,7 +190,7 @@ Three failure modes were observed in earlier picker versions and are now defende
 | Exhibits with "petition" in title | "Ex. 2017 Notice of IPR Petition", "EX1020-Redlined Version of Proposed Corrected Petition" | `documentCategory == exhibit` filter |
 | Expert Declaration ... in Support of Petition | High paper number on declarations | `documentNumber < 10` ceiling |
 
-The full set of failure-mode fixtures lives in `tests/unit/test_petition_picker.py` — every example above is locked in as a regression test.
+The picker is regression-tested against these fixtures; the suite lives next to `src/ml_uspto/parse/petition_picker.py` and locks in every example above.
 
 ## Petition PDF format — native text, no OCR required
 

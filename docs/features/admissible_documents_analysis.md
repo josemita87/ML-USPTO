@@ -293,5 +293,5 @@ Corpus-wide text storage drops from the ~50–90 GB estimate in `../scope/predic
 - `../scope/prediction_scope.md` §5.2 — petition PDFs as the only text source.
 - `patent_file_wrapper_features.md` — patent-side features that join on `patentNumber`.
 - `../examples/ipr_lifecycle_case_study.md` — the full lifecycle this scope deliberately ignores past T₀.
-- `src/data/admissibility.py` — the date-based filter that produced the 46-doc set.
+- `src/ml_uspto/parse/admissibility.py` — the date-based filter that produced the 46-doc set.
 - `data/raw/proceedings/IPR2022-01002/admissible_documents.json` — the manifest.

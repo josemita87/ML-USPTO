@@ -1,12 +1,21 @@
 # Ingestion Pipeline — Systems Plan
 
 **Date**: 2026-04-27
-**Status**: design — not yet executed
+**Status**: design — plumbing landed in PR 1 (commit `97d11e3`); stages 1–6 not yet executed.
 **Scope**: end-to-end ingestion from "no local data" to a feature-ready parquet keyed by `trialNumber`, joining proceedings + petition + patent + petition-text.
 
 This plan consolidates two design passes from session 2026-04-27:
 1. The 4-stage pipeline (proceedings → petition discovery → patents → join).
 2. The PDF download + text-feature extension (stages 5–6).
+
+> **PR 1 deltas vs. this plan** (kept here so the rest of the doc still reads as the original design):
+> - The cache lives in `clients/local.py`, not `ingest/cache.py`. Local FS is treated as a backend client (sibling of `clients/s3.py`).
+> - `ingest/rate_limit.py` was not created. The 5/10/20-second backoff is now `api.backoff_seconds` in `config/settings.yaml`, consumed by `clients/uspto.py`.
+> - There is no `storage/` directory. File I/O primitives moved into `clients/local.py` alongside the cache.
+> - A new `src/ml_uspto/paths.py` is the single source of truth for filesystem paths (`PROJECT_ROOT`, config-file paths, `raw_dir()`, `processed_dir()`, etc.). All modules import it instead of building paths inline.
+> - Eight new Pydantic seam models shipped in `schemas/models.py` (Petition, QuarantineEntry, Patent, PatentFeatures, JoinedTrial, PdfFetchManifestRow, PetitionTextDoc, PetitionTextFeatures).
+>
+> See CLAUDE.md hard rules #1 and #5 for the why.
 
 Authoritative companion docs: `../api/proceedings.md`, `../api/patents.md`, `../api/api_feature_map.md`, `../api/rate_limits.md`, `../scope/prediction_scope.md`.
 
@@ -92,13 +101,15 @@ STAGE 6  Petition text + feature extraction                ~30 min CPU
 
 ```
 src/ml_uspto/
+  paths.py                            [DONE — central filesystem path resolver]
   clients/
     uspto.py                          [MODIFY — add download_pdf, stream_pdf]
+    local.py                          [DONE — local-FS cache + I/O primitives, sibling of s3.py]
   ingest/
     fetch.py                          [REWRITE — stage 1/2/3/4 entrypoints]
     fetch_petition_pdfs.py            [NEW — stage 5 driver]
-    cache.py                          [NEW — local-FS JSON cache, S3-shaped keys]
-    rate_limit.py                     [NEW — burst=1 invariant + backoff constants]
+    schemas/
+      enums.py                        [DONE — Stage enum (proceedings, documents_petition_scan, patents)]
   parse/
     petition_assembler.py             [NEW — group by trialNumber, run picker]
     patent_aggregator.py              [NEW — T₀-filtered aggregations]
@@ -107,9 +118,7 @@ src/ml_uspto/
       enums.py                        [MODIFY — add Parser.PETITION_TEXT]
       constants.py                    [MODIFY — load text_patterns.yaml]
   schemas/
-    models.py                         [MODIFY — see §6 for new models]
-  storage/
-    local.py                          [MODIFY — add save_json/load_json + path resolvers]
+    models.py                         [DONE — 8 seam models added; see §6]
 
 config/
   parsers/
@@ -137,13 +146,13 @@ tests/
   unit/
     test_petition_assembler.py        [NEW]
     test_patent_aggregator.py         [NEW]
-    test_cache.py                     [NEW]
+    test_local.py                     [DONE — clients/local.py round-trip]
     test_petition_text_structural.py  [NEW]
     test_petition_text_substantive.py [NEW]
     test_petition_text_features.py    [NEW — round-trip]
 ```
 
-No new top-level dirs. All adds land inside `ingest/`, `parse/`, `schemas/`, `clients/`, `storage/`, `config/` per CLAUDE.md.
+No new top-level dirs. All adds land inside `ingest/`, `parse/`, `schemas/`, `clients/`, `config/` per CLAUDE.md (local FS is a client backend; there is no `storage/`).
 
 ---
 
@@ -163,20 +172,20 @@ def stream_pdf(self, uri: str, dst: Path, *, timeout: int = 120) -> int:
 
 `stream_pdf` writes atomically (`.tmp` then `os.replace`) so a Ctrl-C mid-download never leaves a half-written PDF that the idempotency check accepts. Both share the existing 5/10/20-second 429 backoff.
 
-### `ingest/cache.py` (new)
+### `clients/local.py` *(DONE in PR 1)*
 
 ```python
-def cache_path(stage: str, key: str) -> Path
-def load_if_present(stage: str, key: str) -> dict | None
-def save(stage: str, key: str, payload: dict) -> None
-def iter_cached(stage: str) -> Iterator[tuple[str, dict]]
+def cache_path(bucket: str, key: str, *, root: Path | None = None) -> Path
+def load_if_present(bucket: str, key: str, *, root: Path | None = None) -> dict | None
+def save(bucket: str, key: str, payload: dict, *, root: Path | None = None) -> None
+def iter_cached(bucket: str, *, root: Path | None = None) -> Iterator[tuple[str, dict]]
 ```
 
-Reads/writes JSON under `<settings.data.raw_dir>/<stage>/<key>.json`. `stage` ∈ `{"proceedings", "documents_petition_scan", "patents"}`. `load_if_present` is the idempotency check — every fetcher hits this before any HTTP call. S3 mapping later: `s3://<bucket>/raw/<stage>/<key>.json` — same key shape, swap `Path` for `clients/s3.py`.
+Reads/writes JSON under `paths.raw_dir() / <bucket> / <key>.json`. `bucket` is generic `str` — callers pass `Stage.PROCEEDINGS` etc. (StrEnum members are str subclasses). `load_if_present` is the idempotency check — every fetcher hits this before any HTTP call. S3 mapping later: `s3://<bucket>/raw/<key>.json` — same key shape, swap `clients/local.py` for `clients/s3.py`. Also hosts the file-I/O primitives (`save_parquet`, `load_parquet`, `save_json`, `load_json`).
 
-### `ingest/rate_limit.py` (new)
+### Rate limiting *(handled in `config/settings.yaml`, not a dedicated module)*
 
-Exposes `BACKOFF_SECONDS = (5, 10, 20)` and a module docstring documenting the burst=1 global invariant. v1 has no actual lock — single-process scripts inherit serialization. The file exists to flag the invariant for any future contributor tempted to `multiprocessing.Pool` it.
+`api.backoff_seconds: [5, 10, 20]` in `config/settings.yaml`, consumed by `USPTOClient._get`/`_post`. The burst=1 global invariant is enforced by single-process serial scripts; if a future contributor wants to parallelize, the invariant must be reasserted (a lock or a single-writer queue). v1 has no lock.
 
 ### `ingest/fetch.py` (rewrite)
 
@@ -366,7 +375,7 @@ data/
 | `data/processed/petition_text/*.json.gz` | yes (~2 GB) | yes | Tier 0 source-of-truth for re-extraction |
 | `data/processed/*.parquet` | yes (~150 MB) | yes | Feature snapshots |
 
-**S3 mapping**: `s3://<bucket>/raw/<stage>/<key>.json` is a 1:1 swap of cache backend; `cache.py` gets a backend flag. `clients/s3.py` (already stubbed) gains `get_object` / `put_object`.
+**S3 mapping**: `s3://<bucket>/raw/<key>.json` is a 1:1 swap of cache backend. `clients/local.py` and a future `clients/s3.py` expose the same `cache_path` / `load_if_present` / `save` / `iter_cached` shape; the fetcher gets a backend flag and stays oblivious to which one it's hitting.
 
 ---
 
@@ -435,8 +444,8 @@ class PetitionTextFeatures:           # Tier 1 + Tier 2
 
 Each step independently runnable + verifiable.
 
-1. **Add `ingest/cache.py` + extend `storage/local.py`** with `save_json`/`load_json`. Unit-test round-trip.
-2. **Add new Pydantic models** to `schemas/models.py`. Validate against fixture payloads.
+1. ✅ **Cache + I/O primitives** — landed as `clients/local.py` (PR 1). Unit-tested in `tests/unit/test_local.py`.
+2. ✅ **Pydantic seam models** — eight models added to `schemas/models.py` (PR 1).
 3. **Land `config/parsers/documents.yaml` + `config/parsers/patents.yaml`**. Verify by running `flatten()` against fixtures.
 4. **Land `config/patents/event_codes.yaml` + `config/petitions/text_patterns.yaml`** + extend `parse/schemas/constants.py`. Verify constants compile.
 5. **Add `download_pdf` + `stream_pdf` to `clients/uspto.py`** — manual probe against ~5 known petition URIs to confirm auth and atomic rename.

@@ -56,7 +56,7 @@ Practical implication for modeling: the prediction target is the **trial outcome
 
 ## 2. Target Variable
 
-**IPR trial outcome** — exclusively. What happens at the end of the trial (claims upheld, claims cancelled, settled, terminated, …), derived from `trial_status` / `trial_outcome` on the proceedings record. Binary vs. multi-class framing, and how to treat settlements/terminations, is still TBD.
+**IPR trial outcome** — exclusively. **Binary**: `1` = the patent owner lost (a Final Written Decision held all challenged claims unpatentable); `0` = anything else (institution denied, discretionary denial, settled before FWD, terminated procedurally, or FWD where any claim survived). The label is built from `trial_status` and decision-row outcome fields per the taxonomy in [`config/labels.yaml`](config/labels.yaml); see [`docs/scope/prediction_scope.md`](docs/scope/prediction_scope.md) §3 for the full rationale.
 
 The institution decision is **not** a target. It is an intermediate event on the path to the trial outcome — a petition that fails institution is effectively a "claims survive" outcome for the patent owner, so the institution gate is absorbed into the trial-outcome label. Institution-stage signals (Fintiv, 325(d), Sotera, the decision text itself) are used as *features*.
 
@@ -140,6 +140,8 @@ Extraction notes live in `docs/scope/domain_notes.md`.
 ## 8. Related Files
 
 - [`docs/`](docs/) — technical documentation (start here for API ↔ feature mapping)
+- [`docs/scope/prediction_scope.md`](docs/scope/prediction_scope.md) — what we predict, T₀ leakage rule, label taxonomy
 - [`docs/scope/domain_notes.md`](docs/scope/domain_notes.md) — full domain notes from practitioner calls
 - [`docs/api/proceedings.md`](docs/api/proceedings.md) — PTAB API proceedings-schema notes
-- `src/exploration.py` — exploratory code
+- [`docs/plans/2026-04-27-ingestion-pipeline.md`](docs/plans/2026-04-27-ingestion-pipeline.md) — six-stage ingestion plan
+- [`src/ml_uspto/`](src/ml_uspto/) — package source (`clients/`, `parse/`, `ingest/`, `schemas/`, `paths.py`)

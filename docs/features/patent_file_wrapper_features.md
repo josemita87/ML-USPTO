@@ -1,5 +1,7 @@
 # Patent File Wrapper as a Supplementary Feature Source
 
+> **⚠ Superseded for endpoint specifics by [`../api/patents.md`](../api/patents.md)**, which is the canonical reference for `/applications/{appNum}` shape, leakage rules (especially `eventDataBag` carrying `TRIAL*` codes — the label), and field-level T₀ filtering. This document predates that probe (2026-04-27); read it for **why** patent-file-wrapper data is useful, not for **which fields** to fetch. Where the two disagree (e.g., `parentContinuityBag`), `patents.md` wins.
+
 The USPTO Open Data Portal `patent/applications/search` endpoint (the "patent file wrapper" data) is a separate system from the PTAB API. It describes how a patent was *prosecuted and granted* — not whether it was later challenged at the PTAB. It is not a replacement for the PTAB endpoints that source our target and institution-stage features, but it is a useful **patent-owner-side** enrichment layer.
 
 Join key: `patentNumber` (also present on PTAB proceedings as `patent_number`) or `applicationNumberText`.

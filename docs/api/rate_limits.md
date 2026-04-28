@@ -52,7 +52,7 @@ For the canonical cost model under the current scope, see **`../scope/prediction
 
 ## 3. Client-side behavior
 
-`USPTOClient._get` / `_post` (see `src/data/client.py`):
+`USPTOClient._get` / `_post` (see `src/ml_uspto/clients/uspto.py`):
 
 - On 429, back off **5s, 10s, 20s** across three retries (ODP minimum is 5s — not the earlier 2s/4s/8s).
 - Raises `RuntimeError` after three 429s.
