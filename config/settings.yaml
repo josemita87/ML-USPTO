@@ -3,6 +3,10 @@ api:
   # Set your API key in .env file as USPTO_API_KEY
   page_size: 100
   max_pages: 50  # ~5000 records
+  # Burst=1 invariant — USPTO ODP serializes globally, so single-process
+  # ingestion inherits serialization for free; never multiprocess this.
+  # Sequence is the per-attempt sleep after a 429; ODP requires >=5s.
+  backoff_seconds: [5, 10, 20]
 
 data:
   raw_dir: "data/raw"

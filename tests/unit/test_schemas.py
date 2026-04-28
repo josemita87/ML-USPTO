@@ -59,3 +59,121 @@ def test_proceeding_ignores_unknown_fields():
     p = Proceeding.model_validate(payload)
 
     assert p.trial_number == "IPR2026-00339"
+
+
+# ---------------------------------------------------------------------------
+# Smoke tests for the new pipeline-seam models. They are constructed
+# internally (not parsed from API JSON), so we only check construction +
+# defaults + nesting rather than alias round-trips.
+# ---------------------------------------------------------------------------
+
+
+from datetime import datetime
+
+from ml_uspto.schemas.models import (
+    JoinedTrial,
+    Patent,
+    PatentFeatures,
+    PdfFetchManifestRow,
+    Petition,
+    PetitionTextDoc,
+    PetitionTextFeatures,
+    QuarantineEntry,
+)
+
+
+def test_petition_minimal_construction():
+    p = Petition(
+        trial_number="IPR2024-00123",
+        petition_document_id="doc-abc",
+        petition_filing_date_doc=date(2024, 3, 1),
+        petition_pdf_uri="https://example.test/petition.pdf",
+    )
+    assert p.petition_title is None
+    assert p.petition_category is None
+
+
+def test_quarantine_entry_default_sample_titles_is_empty():
+    q = QuarantineEntry(trial_number="IPR2014-00999", reason="no_match", n_candidates=0)
+    assert q.sample_titles == []
+
+
+def test_patent_features_counters_default_to_zero():
+    f = PatentFeatures(trial_number="IPR2024-00123", application_number="14709428")
+    assert f.n_events_pre_t0 == 0
+    assert f.n_office_actions == 0
+    assert f.days_grant_to_petition is None
+
+
+def test_joined_trial_nests_patent_features():
+    pf = PatentFeatures(
+        trial_number="IPR2024-00123",
+        application_number="14709428",
+        cpc_section="G",
+        n_events_pre_t0=42,
+    )
+    jt = JoinedTrial(
+        trial_number="IPR2024-00123",
+        petition_filing_date=date(2024, 3, 1),
+        cancelled=1,
+        petition_pdf_uri="https://example.test/petition.pdf",
+        petition_filing_date_doc=date(2024, 3, 1),
+        patent_features=pf,
+    )
+    assert jt.patent_features is not None
+    assert jt.patent_features.cpc_section == "G"
+    assert jt.cancelled == 1
+
+
+def test_joined_trial_allows_missing_patent_features():
+    jt = JoinedTrial(
+        trial_number="IPR2024-00123",
+        petition_filing_date=date(2024, 3, 1),
+        cancelled=0,
+        petition_pdf_uri="https://example.test/petition.pdf",
+        petition_filing_date_doc=date(2024, 3, 1),
+    )
+    assert jt.patent_features is None
+
+
+def test_pdf_fetch_manifest_row_records_failure():
+    row = PdfFetchManifestRow(
+        trial_number="IPR2024-00123",
+        http_status=503,
+        fetched_at=datetime(2026, 4, 28, 12, 0, 0),
+        error="Service Unavailable",
+    )
+    assert row.bytes is None
+    assert row.sha256 is None
+    assert row.http_status == 503
+
+
+def test_petition_text_doc_holds_pages():
+    doc = PetitionTextDoc(
+        trial_number="IPR2024-00123",
+        page_count=2,
+        char_count=10,
+        pages=["hello", "world"],
+        pdfplumber_version="0.11.0",
+        extracted_at=datetime(2026, 4, 28, 12, 0, 0),
+    )
+    assert len(doc.pages) == 2
+
+
+def test_petition_text_features_word_count_optional_others_zero():
+    feats = PetitionTextFeatures(
+        trial_number="IPR2024-00123",
+        petition_page_count=88,
+        text_doc_sha256="0" * 64,
+        extracted_at=datetime(2026, 4, 28, 12, 0, 0),
+    )
+    assert feats.petition_word_count is None
+    assert feats.n_claims_challenged == 0
+    assert feats.has_sotera_stipulation is False
+    assert feats.n_grounds_102 == 0
+
+
+def test_patent_default_cpc_codes_is_empty():
+    p = Patent(application_number="14709428")
+    assert p.cpc_codes == []
+    assert p.first_inventor_to_file is None

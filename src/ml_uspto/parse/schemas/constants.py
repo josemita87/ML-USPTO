@@ -9,14 +9,12 @@ from functools import lru_cache
 
 import yaml
 
-from ml_uspto.settings import PROJECT_ROOT
-
-_PETITION_PICKER_PATH = PROJECT_ROOT / "config" / "petition_picker.yaml"
+from ml_uspto import paths
 
 
 @lru_cache(maxsize=1)
 def _load() -> dict:
-    with open(_PETITION_PICKER_PATH) as f:
+    with open(paths.PETITION_PICKER_YAML) as f:
         return yaml.safe_load(f)
 
 

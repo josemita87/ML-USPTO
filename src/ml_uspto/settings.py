@@ -1,4 +1,8 @@
-"""Application settings loaded from .env + config/settings.yaml via pydantic-settings."""
+"""Application settings loaded from .env + config/settings.yaml via pydantic-settings.
+
+Filesystem locations are owned by `ml_uspto.paths` — this module only
+defines configurable values (API keys, page sizes, data dir names).
+"""
 
 from functools import lru_cache
 from pathlib import Path
@@ -7,19 +11,17 @@ import yaml
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_ENV_FILE = PROJECT_ROOT / ".credentials.env"
+from ml_uspto import paths
 
 
 def _load_yaml() -> dict:
-    path = PROJECT_ROOT / "config" / "settings.yaml"
-    with open(path) as f:
+    with open(paths.SETTINGS_YAML) as f:
         return yaml.safe_load(f)
 
 
 class APISettings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=_ENV_FILE,
+        env_file=paths.CREDENTIALS_ENV,
         env_file_encoding="utf-8",
         env_prefix="USPTO_",
         extra="ignore",
@@ -29,6 +31,7 @@ class APISettings(BaseSettings):
     base_url: str = "https://api.uspto.gov/api/v1/patent"
     page_size: int = 100
     max_pages: int = 50
+    backoff_seconds: list[int] = Field(default_factory=lambda: [5, 10, 20])
 
 
 class DataSettings(BaseSettings):
@@ -69,11 +72,6 @@ class Settings(BaseSettings):
             model=ModelSettings(**model_vals),
             **kwargs,
         )
-
-    def ensure_dirs(self) -> None:
-        for d in (self.data.raw_dir, self.data.processed_dir, self.data.models_dir):
-            (PROJECT_ROOT / d).mkdir(parents=True, exist_ok=True)
-
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

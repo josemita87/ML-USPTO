@@ -15,15 +15,13 @@ from typing import Any
 import pandas as pd
 import yaml
 
+from ml_uspto import paths
 from ml_uspto.parse.schemas.enums import Parser
-from ml_uspto.settings import PROJECT_ROOT
-
-PARSERS_CONFIG_PATH = PROJECT_ROOT / "config" / "parsers" / "patents.yaml"
 
 
 @lru_cache(maxsize=1)
 def _load_all() -> dict[str, Any]:
-    with open(PARSERS_CONFIG_PATH) as f:
+    with open(paths.PARSERS_YAML) as f:
         return yaml.safe_load(f)
 
 
@@ -54,4 +52,4 @@ def flatten(records: Iterable[Mapping[str, Any]], parser: Parser) -> pd.DataFram
     return flatten_records(records, load_parser_config(parser))
 
 
-__all__ = ["PARSERS_CONFIG_PATH", "flatten", "flatten_records", "load_parser_config"]
+__all__ = ["flatten", "flatten_records", "load_parser_config"]

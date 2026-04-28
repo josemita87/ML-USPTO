@@ -15,6 +15,7 @@ class USPTOClient:
     def __init__(self):
         settings = get_settings()
         self.base_url = settings.api.base_url
+        self.backoff_seconds = settings.api.backoff_seconds
         self.session = requests.Session()
         if settings.api.api_key:
             self.session.headers["X-API-Key"] = settings.api.api_key
@@ -170,27 +171,23 @@ class USPTOClient:
         return body
 
     def _get(self, url: str, params: dict | None = None) -> dict:
-        for attempt in range(3):
+        for wait in self.backoff_seconds:
             resp = self.session.get(url, params=params, timeout=30)
             if resp.status_code == 429:
-                # ODP requires min 5s delay on 429; back off 5s, 10s, 20s.
-                wait = 5 * (2 ** attempt)
                 logger.warning("Rate limited (429), waiting %ds", wait)
                 time.sleep(wait)
                 continue
             resp.raise_for_status()
             return resp.json()
-        raise RuntimeError(f"Failed after 3 retries: {url}")
+        raise RuntimeError(f"Failed after {len(self.backoff_seconds)} retries: {url}")
 
     def _post(self, url: str, body: dict) -> dict:
-        for attempt in range(3):
+        for wait in self.backoff_seconds:
             resp = self.session.post(url, json=body, timeout=60)
             if resp.status_code == 429:
-                # ODP requires min 5s delay on 429; back off 5s, 10s, 20s.
-                wait = 5 * (2 ** attempt)
                 logger.warning("Rate limited (429), waiting %ds", wait)
                 time.sleep(wait)
                 continue
             resp.raise_for_status()
             return resp.json()
-        raise RuntimeError(f"Failed after 3 retries: {url}")
+        raise RuntimeError(f"Failed after {len(self.backoff_seconds)} retries: {url}")
