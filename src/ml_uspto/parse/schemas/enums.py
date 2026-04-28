@@ -12,3 +12,4 @@ class Parser(StrEnum):
 
     PROCEEDINGS = "proceedings"
     DECISIONS = "decisions"
+    DOCUMENTS = "documents"

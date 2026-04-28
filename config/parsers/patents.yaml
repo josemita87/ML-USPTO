@@ -44,3 +44,22 @@ decisions:
     document_type: documentData.documentTypeDescriptionText
     document_filing_date: documentData.documentFilingDate
     filing_party: documentData.filingPartyCategory
+
+# Documents/search rows. Only `documentData.*` paths are mapped here.
+# `trialMetaData.*` is intentionally absent — on a documents row it is the
+# trial header denormalized at indexer time and lags the proceedings side
+# by minutes-to-months (see docs/api/proceedings.md "What we observed"),
+# so any feature pulled from it risks silent post-T₀ contamination. The
+# YAML statically enforces the source-of-truth rule from proceedings.md
+# §"Field-by-field paths".
+documents:
+  columns:
+    trial_number: trialNumber
+
+    document_number: documentData.documentNumber
+    document_title: documentData.documentTitleText
+    document_name: documentData.documentName
+    document_category: documentData.documentCategory
+    document_filing_date: documentData.documentFilingDate
+    filing_party: documentData.filingPartyCategory
+    file_download_uri: documentData.fileDownloadURI
