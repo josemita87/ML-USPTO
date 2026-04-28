@@ -74,15 +74,22 @@ def test_petitioners_petition_passes_blacklist():
 
 
 def test_corrected_petition_does_not_displace_original():
-    """IPR2020-01483: when both 'Petition' and 'Corrected Petition' exist,
-    take the lowest documentNumber (the original)."""
+    """IPR2020-01483: when 'Petition for IPR' and 'Corrected Petition for IPR'
+    both exist, take the lowest documentNumber (the original).
+
+    Also asserts that 'Petitioner's Petition Ranking and Explanation of
+    Material Differences' (a procedural multi-petition filing, NOT the
+    operative petition) is rejected — the title doesn't have "Petition for"
+    or "Petition:", so the tightened title regex drops it before paper-number
+    comparison.
+    """
     rows = [
         doc(2, "Petitioner's Petition Ranking and Explanation of Material Differences"),
         doc(3, "Petition for Inter Partes Review"),
-        doc(8, "Corrected Petition - IPR2020-01483"),
+        doc(8, "Corrected Petition for Inter Partes Review of US 10,000,000"),
     ]
     picked = pick_petition(rows)
-    assert picked["documentData"]["documentNumber"] == 2
+    assert picked["documentData"]["documentNumber"] == 3
 
 
 def test_notice_of_filing_date_accorded_is_blacklisted():

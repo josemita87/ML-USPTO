@@ -143,12 +143,12 @@ stage 4 lands.
 - [ ] `config/patents/event_codes.yaml` — event-code prefix families
       (office_actions, ids, maintenance, trial-banned)
 
-### Driver scripts (`scripts/` doesn't exist yet)
-- [ ] `scripts/run_ingest_proceedings.py`
-- [ ] `scripts/run_ingest_petitions.py`
-- [ ] `scripts/run_ingest_patents.py`
-- [ ] `scripts/run_join.py`
-- [ ] `scripts/run_extract_petition_text.py` (chains stages 5+6 with
+### Driver scripts (`drivers/`)
+- [x] `drivers/run_ingest_proceedings.py`
+- [x] `drivers/run_ingest_petitions.py`
+- [ ] `drivers/run_ingest_patents.py`
+- [ ] `drivers/run_join.py`
+- [ ] `drivers/run_extract_petition_text.py` (chains stages 5+6 with
       `--skip-fetch`, `--skip-features`, `--text-only`)
 
 ### Test fixtures + new unit tests

@@ -45,6 +45,18 @@ def models_dir() -> Path:
     return PROJECT_ROOT / get_settings().data.models_dir
 
 
+def trials_parquet() -> Path:
+    return processed_dir() / "trials.parquet"
+
+
+def petitions_parquet() -> Path:
+    return processed_dir() / "petitions.parquet"
+
+
+def petition_quarantine_parquet() -> Path:
+    return processed_dir() / "petition_quarantine.parquet"
+
+
 def resolve(relative: Path | str) -> Path:
     """Resolve a project-relative path to absolute."""
     return PROJECT_ROOT / relative

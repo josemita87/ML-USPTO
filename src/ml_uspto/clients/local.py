@@ -38,8 +38,8 @@ def save_parquet(df: pd.DataFrame, path: Path) -> None:
     df.to_parquet(path, index=False)
 
 
-def load_parquet(path: Path) -> pd.DataFrame:
-    return pd.read_parquet(path)
+def load_parquet(path: Path, *, columns: list[str] | None = None) -> pd.DataFrame:
+    return pd.read_parquet(path, columns=columns)
 
 
 def save_json(payload: dict, path: Path) -> None:

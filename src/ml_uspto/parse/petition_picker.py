@@ -59,7 +59,7 @@ def pick_petition(rows: Iterable[Mapping[str, Any]]) -> dict | None:
     for row in rows:
         dd = row.get("documentData") or {}
         title = dd.get("documentTitleText") or dd.get("documentName") or ""
-        category = (dd.get("documentCategory") or "").lower()
+        category = dd.get("documentCategory") or ""
         number = dd.get("documentNumber") or 9999
 
         if category in EXHIBIT_CATEGORIES:

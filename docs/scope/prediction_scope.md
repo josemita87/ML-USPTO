@@ -119,14 +119,15 @@ flowchart LR
 | Domain-expert Fintiv-rating spreadsheet | **Optional.** Useful for understanding why some petitions get discretionary-denied — informs petition-side feature engineering — but not used as a feature directly. |
 | Per-trial document indices for petition / POPR / FWD enumeration | **Cut.** Petition retrieval only. |
 
-### 5.2 The petition PDF is the only text-feature source
+### 5.2 Petition PDF text features deferred to v2
 
-We open exactly one PDF per trial: the petition (Paper 3), plus optionally a small ranking-notice PDF (Paper 2, ~140 KB, only present when ≥2 petitions stack against the same patent). Per §8.1 every other admissible PDF is skipped. Net text-storage budget: **~4–5 GB corpus-wide** (~18K petitions × ~4 MB ≈ 70 GB upper bound; in practice many petitions are smaller).
+**v1 is metadata-only.** No petition PDF is downloaded or parsed. The petition row's `documentData.fileDownloadURI` is captured in `petitions.parquet` but not dereferenced. Tier 1 (structural / volumetric) and Tier 2 (statutory / procedural posture) text features are deferred until the metadata-only baseline is established.
 
-Retrieval path:
+Retrieval path used in v1:
 1. **Trial inventory + label** — `POST /trials/proceedings/search` paginated, filtered to `trialMetaData.trialTypeCode: "IPR"`. One row per trial with live `trialStatusCategory`, `terminationDate`, etc.
-2. **Per-trial petition row** — for each trial, `POST /trials/documents/search` with `filters: [{name: "trialNumber", value: [<trial>]}]`, paginated. Run the petition picker (see `../api/proceedings.md` "Petition coverage and the category-taxonomy drift") to identify the petition row from its document-list. The picker handles both the new `documentCategory: "PETITION"` taxonomy and the legacy `Paper` catch-all bucket. Use **only `documentData.*`** from the picked row — `fileDownloadURI` (for the PDF), `documentFilingDate` (= T₀), `documentNumber`, `documentTitleText`. The `trialMetaData` block on this row is **not** frozen at T₀ (refer to `../api/proceedings.md` "What we observed"); it is the live trial header lagged by the documents-endpoint indexer cadence and may carry post-T₀ values. All trial / patent / party features come from the proceedings row in step 1, not from this row.
-3. **PDF download** — `GET <documentData.fileDownloadURI>` from the picked row.
+2. **Corpus-wide petition row** — `POST /trials/documents/search` filtered to `documentData.documentCategory IN ["PETITION", "Paper"]`, paginated, then grouped by `trialNumber` and run through `pick_petition()` (see `../api/proceedings.md` "Petition coverage and the category-taxonomy drift"). Use **only `documentData.*`** from the picked row — `fileDownloadURI` (stored for v2), `documentFilingDate` (= T₀), `documentNumber`, `documentTitleText`. The `trialMetaData` block on this row is **not** frozen at T₀ (refer to `../api/proceedings.md` "What we observed"); pull all trial / patent / party features from the proceedings row in step 1.
+
+> **v2 (deferred): step 3 — `GET <documentData.fileDownloadURI>` per petition + `pdfplumber` extraction → Tier 1/2 features.**
 
 ### 5.3 Patent file wrapper bulk products become first-tier
 
@@ -141,19 +142,22 @@ Download-once-cache-locally discipline applies (the 20-per-file-per-year bulk ca
 
 ### 5.4 Cost model (canonical for this scope)
 
-The corpus-wide `documentCategory: "PETITION"` filter only catches ~6K of the ~18K IPR trials, because pre-2022 trials use the legacy `Paper` category (which is also a catch-all for all procedural papers). The canonical ingestion path is a **single corpus-wide scan filtered to `documentCategory IN ["PETITION", "Paper"]`** with the picker applied per trial — validated empirically at 98.7% recall, 0 false positives across 239 stratified trials (see `../api/proceedings.md`). The earlier per-trial draft (18K calls) is superseded by the corpus-wide scan (~3K calls) — same coverage, ~6× fewer requests.
+The corpus-wide `documentData.documentCategory: "PETITION"` filter only catches ~6K of the ~18K IPR trials, because pre-2022 trials use the legacy `Paper` category (which is also a catch-all for all procedural papers). The canonical ingestion path is a **single corpus-wide scan filtered to `documentData.documentCategory IN ["PETITION", "Paper"]`** with the picker applied per trial — validated empirically at 98.7% recall, 0 false positives across 239 stratified trials (see `../api/proceedings.md`). The earlier per-trial draft (18K calls) is superseded by the corpus-wide scan (~3.2K calls) — same coverage, ~6× fewer requests.
+
+**v1 cost model (metadata-only):**
 
 | Pass | Calls / size | Bucket | Wall time |
 |---|---:|---|---|
 | Trial inventory + label — `POST /trials/proceedings/search` paginated | ~200 calls | Metadata (5M/wk) | ~30 s |
-| Corpus-wide petition scan — `POST /trials/documents/search` filtered to `documentCategory IN ["PETITION", "Paper"]`, paginated 100/page | ~3K calls (~301K rows fetched, ~18K kept after `pick_petition()`) | Metadata (5M/wk) | ~5 min serial |
+| Corpus-wide petition scan — `POST /trials/documents/search` filtered to `documentData.documentCategory IN ["PETITION", "Paper"]`, paginated 100/page | ~3.2K calls (~323K rows fetched, ~17.8K kept after `pick_petition()`) | Metadata (5M/wk) | ~25–30 min serial (rate-limit-bound) |
 | Per-trial fallback for picker quarantine (~1.3% of trials) | ~230 calls | Metadata (5M/wk) | ~1 min |
-| Optional FWD label cross-check — `POST /trials/documents/search` filtered to `documentCategory: "FINAL"` | ~20 calls | Metadata (5M/wk) | ~5 s |
-| Petition PDF downloads | ~18K, **~70 GB raw / ~2 GB extracted text** | File-Wrapper Documents (1.2M/wk) | **~10 h** |
+| Optional FWD label cross-check — `POST /trials/documents/search` filtered to `documentData.documentCategory: "FINAL"` | ~20 calls | Metadata (5M/wk) | ~5 s |
 | Patent file-wrapper enrichment — `GET /applications/{appNum}` per unique app | ~10–13K calls | Patent metadata bucket | ~3–4 h |
 | Bulk: `PASDL` + `PTMNFEE2` + `PTFWPRE` | 3 products, ~70 GB | Bulk (20/file/yr) | one-time |
 
-Total live-API wall-clock: **~13–14 h**, dominated by petition PDF downloads. The 30-min PDF estimate in earlier drafts of this section was wrong — empirical probe (2026-04-27) measured ~5.7 s per (search + download) call and pure download alone at ~2 s/petition; serial × 18K = ~10 h, not 30 min. Both API buckets sit comfortably inside the 5M/wk metadata cap and the 1.2M/wk file-wrapper cap; the binding constraint is wall-clock from burst=1 serialization, not quota. Storage: ~70 GB raw petition PDFs **kept on local FS only** (never pushed to S3 — 70 GB > AWS free-tier 5 GB cap); ~2 GB compressed extracted text + ~50 MB feature parquets pushed to S3. PDFs are re-downloadable from `fileDownloadURI` so they can be deleted after extraction if local disk pressure builds. **This table is canonical for this project — `../api/rate_limits.md` §2 and `../api/api_feature_map.md` §5 defer to it.**
+> **v2 (deferred): petition PDF downloads** — ~18K calls, ~70 GB raw / ~2 GB extracted text, File-Wrapper Documents bucket, ~10 h serial.
+
+Total v1 live-API wall-clock: **~3–4 h**, dominated by per-application patent fetches. The metadata bucket sits comfortably inside the 5M/wk cap; the binding constraint is wall-clock from burst=1 serialization, not quota. Storage: ~5 GB JSON cache + ~100 MB feature parquets, all on local FS (and replicable to S3 within free-tier limits). Empirical probe (2026-04-28): the petition-scan stage runs at ~0.85 s/page including the ~5 s 429 backoffs that happen every ~250 pages, so ~3.2K pages = ~25–30 min wall-clock — roughly 5× the original 5-min estimate, but still small relative to stage 3. **This table is canonical for v1 — `../api/rate_limits.md` §2 and `../api/api_feature_map.md` §5 defer to it. v2 PDF-download wall-clock (~10 h) added when stage 5 is implemented.**
 
 ### 5.5 Train / test symmetry
 
@@ -192,7 +196,7 @@ Neither endpoint enforces leakage discipline for us — the API has no T₀-froz
 - **Joinder treatment.** Quantify the joinder share of the corpus; decide whether to exclude or include with an `is_joinder` indicator.
 - **Pre / post-2025 regime split.** New discretionary-denial framework took effect June 2025. Either include a regime indicator or fit two regime-specific models and compare.
 - **Time-correct base rates.** Implementation discipline — art-unit / tech-center base-rate features must use only trials with terminating FWDs before T₀, not the full corpus.
-- **Petition-text feature granularity.** Begin with bag-of-words / TF-IDF + structural counts (claims challenged, prior-art references, ground count). Defer transformer-based embeddings until the structured baseline is established.
+- **Petition-text feature granularity (v2 scope).** v1 ships no petition-text features. v2 starts with bag-of-words / TF-IDF + Tier 1/2 structural counts (claims challenged, prior-art references, ground count). Transformer-based embeddings deferred behind that.
 
 ## 8. Modeling assumptions and known limitations
 

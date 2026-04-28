@@ -3,7 +3,13 @@
 # `docs/api/proceedings.md` for the category-taxonomy drift this works around.
 
 # Title MUST match at least one of these alternatives (case-insensitive).
-# Joined with `|` at load time.
+# Joined with `|` at load time. Bare `\bpetition\b` is intentionally
+# permissive — real petition titles take many shapes (`Petition for IPR`,
+# `[PUBLIC] Petition for IPR`, `Inter Partes Review Petition of …`,
+# `IPR Petition - <party> <patent#>`, `Corrected Petition for IPR`); a
+# tighter regex empirically over-rejects. False-positives within the
+# PETITION+Paper bucket are caught by `blacklist_alternatives` below
+# (Ranking Documents, post-decision petitions, etc.).
 title_alternatives:
   - \bpetition\b
   - \binter\s+part(?:e|ie)s\s+review\s+of\b
@@ -26,15 +32,42 @@ blacklist_alternatives:
   - institution of inter partes
   - motion for joinder
   - grant of motion for joinder
+  - petition for reconsideration
+  - petition for rehearing
+  - petition for joinder
+  # `Petitioner's Petition Ranking and Explanation of Material Differences`
+  # is a procedural multi-petition filing (37 CFR §42.108), NOT the
+  # operative petition. The `petitioner['s] (?!petition)` clause above
+  # doesn't catch it (next word IS `petition`), so we blacklist explicitly.
+  - petition ranking
 
 # Empirically 94% of real petitions sit at paper 1–3, none observed past
 # paper 8 across 239 stratified trials. Drop rows at or above this number.
 paper_number_ceiling: 10
 
-# `documentCategory` values to exclude outright.
+# `documentCategory` values to exclude outright. Canonical API casing —
+# resolved to `DocumentCategory` enum members at load time.
 exhibit_categories:
-  - exhibit
-  - exhibits
+  - Exhibit
+  - Exhibits
+
+# Stage 2 corpus-wide scan filter. Consumed by `ingest.fetch.fetch_petitions`.
+# `documentData.documentCategory` values to keep when paginating
+# `/trials/documents/search`. PETITION + Paper cover the bulk per
+# `docs/api/proceedings.md` "Petition coverage and the category-taxonomy
+# drift".
+#
+# Known excluded: `OTHER`. A 2000-row probe (2026-04-28) found 0 genuine
+# petitions in OTHER but 44% of titles contained the word "petition" in
+# non-petition contexts (sur-replies, ranking docs, refund requests). A
+# tiny slice of recent split-filing trials does file the operative
+# `[PUBLIC] Petition for IPR …` under category=OTHER — those will land
+# in `picker_no_match` quarantine, which is the right failure mode for
+# a leakage-sensitive system.
+scan_filter:
+  document_categories:
+    - PETITION
+    - Paper
 
 # Stage 2 quarantine output. Consumed by `parse.petition_assembler`.
 quarantine:

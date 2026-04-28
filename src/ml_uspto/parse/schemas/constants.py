@@ -10,6 +10,7 @@ from functools import lru_cache
 import yaml
 
 from ml_uspto import paths
+from ml_uspto.schemas.enums import DocumentCategory
 
 
 @lru_cache(maxsize=1)
@@ -23,5 +24,7 @@ _cfg = _load()
 PETITION_TITLE: re.Pattern[str] = re.compile("|".join(_cfg["title_alternatives"]), re.I)
 BLACKLIST: re.Pattern[str] = re.compile("|".join(_cfg["blacklist_alternatives"]), re.I)
 PAPER_NUMBER_CEILING: int = _cfg["paper_number_ceiling"]
-EXHIBIT_CATEGORIES: frozenset[str] = frozenset(_cfg["exhibit_categories"])
+EXHIBIT_CATEGORIES: frozenset[DocumentCategory] = frozenset(
+    DocumentCategory(s) for s in _cfg["exhibit_categories"]
+)
 QUARANTINE_SAMPLE_TITLES_LIMIT: int = _cfg["quarantine"]["sample_titles_limit"]

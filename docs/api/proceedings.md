@@ -67,7 +67,7 @@ The verdict-level field (`trialOutcomeCategory == "All Challenged Claims Unpaten
 |---|---|---|
 | **Trial inventory + live label state** (status, terminationDate, latestDecisionDate, current categorization) | `POST /trials/proceedings/search` | Maintains the freshest trial-level state. One row per trial. Canonical source for the label. |
 | **Petition PDF URI + T₀ confirmation** | `POST /trials/documents/search` filtered by `trialNumber`, then `pick_petition()` | The petition row carries `documentData.fileDownloadURI` and `documentData.documentFilingDate` (= T₀). **Use only `documentData.*` fields from this row.** `trialMetaData` on the row is lagged and may be post-T₀. |
-| **Label assembly via decisions** (alternative to proceedings status) | `POST /trials/documents/search` filtered to `documentCategory: "FINAL"`, or `POST /trials/decisions/search` | FWD-type document rows have populated `decisionData` (`trialOutcomeCategory`, `issueTypeBag`, `statuteAndRuleBag`, `decisionIssueDate`). Per-corpus probe shows 1,822 FINAL rows across IPR. |
+| **Label assembly via decisions** (alternative to proceedings status) | `POST /trials/documents/search` filtered to `documentData.documentCategory: "FINAL"`, or `POST /trials/decisions/search` | FWD-type document rows have populated `decisionData` (`trialOutcomeCategory`, `issueTypeBag`, `statuteAndRuleBag`, `decisionIssueDate`). Per-corpus probe shows 1,822 FINAL rows across IPR. |
 
 ## Field-by-field paths
 
@@ -98,14 +98,15 @@ For the proceedings schema used by `ml_uspto.parse.preprocessing`:
 
 ## Probe-derived caveats
 
-- **Filter case-insensitivity.** `documentCategory: "PETITION"` and `documentCategory: "Petition"` return the same 5,999 rows. The facet returns the upper-case form.
-- **`documentTypeName` is unindexed.** Filtering or faceting on it returns empty — use `documentCategory` instead.
+- **Filter field path.** Filters on `documents/search` must use the full dotted path `documentData.documentCategory` (empirical 2026-04-28). The bare name `documentCategory` returns a 404 *domain-level* response (`detailedMessage: "No matching records found"`) — easy to misread as a routing error. Same likely holds for any other `documentData.*` field. Earlier drafts of this doc claimed the bare name worked; that was wrong.
+- **Filter case-insensitivity.** `documentData.documentCategory: "PETITION"` and `"Petition"` return the same row count. The facet returns the upper-case form.
+- **`documentTypeName` is unindexed.** Filtering or faceting on it returns empty — use `documentData.documentCategory` instead.
 - **GET vs POST.** `/trials/documents/search` is **POST-only** — `GET` returns 404. Same for `/trials/decisions/search`.
 - **Per-trial GET endpoint is capped at 25 rows with no pagination.** Use the cross-trial POST endpoint (`/trials/documents/search` filtered by `trialNumber`) instead — it paginates to the full document list.
 
 ## Petition coverage and the category-taxonomy drift
 
-A naive filter on `documentCategory: "PETITION"` returns only **5,999 rows** vs **18,058 IPR trials** — a 67% coverage gap. Probing showed this is **not missing data**; it's a category-taxonomy drift across years.
+A naive filter on `documentData.documentCategory: "PETITION"` returns only **6,318 rows** (2026-04-28; 5,999 in earlier probes) vs **~19K IPR trials** — a 67% coverage gap. Probing showed this is **not missing data**; it's a category-taxonomy drift across years.
 
 **Year-by-year coverage of `documentCategory: "PETITION"` against proceedings:**
 
@@ -123,13 +124,13 @@ Year     proceedings     PETITION rows     coverage
 
 The post-2022 taxonomy uses fine-grained categories (`PETITION`, `MOTION`, `RESPONSE`, `REPLY`, `FINAL`, …). Pre-2022 the taxonomy collapses **all procedural papers into the `Paper` bucket** (294,925 rows corpus-wide) — petitions, motions, orders, mandatory notices share the same label. There is no separate "petition_legacy" category to add to the filter.
 
-A multi-value filter `documentCategory IN ["PETITION", "Paper"]` returns **300,924 rows**, of which only ~6% are actual petitions. Category alone cannot disambiguate.
+A multi-value filter `documentData.documentCategory IN ["PETITION", "Paper"]` returns **323,030 rows** (2026-04-28; 300,924 in earlier probes), of which only ~6% are actual petitions. Category alone cannot disambiguate.
 
 **Resolution: corpus-wide scan + title matcher + paper-number ceiling.** The canonical implementation lives in `src/ml_uspto/parse/petition_picker.py`. Empirical validation on a stratified probe of 239 trials (2012–2025, all terminal statuses): **98.7% clean recall, 0 false positives.** The remaining 1.3% fall through to a quarantine list rather than feeding wrong PDFs into the feature pipeline — the right failure mode for a leakage-sensitive system.
 
 The strategy:
 
-1. **One corpus-wide scan**, not per-trial. `POST /trials/documents/search` with `filters: [{name: "documentCategory", value: ["PETITION", "Paper"]}]`, paginated. Returns ~301K rows in ~3K calls of 100/page — far cheaper than the 18K per-trial calls in the earlier draft of this doc.
+1. **One corpus-wide scan**, not per-trial. `POST /trials/documents/search` with `filters: [{name: "documentData.documentCategory", value: ["PETITION", "Paper"]}]`, paginated. Returns ~323K rows in ~3.2K calls of 100/page — far cheaper than the 18K per-trial calls in the earlier draft of this doc.
 2. **Apply the picker per trial** (group by `trialNumber`). Take the lowest `documentNumber` among rows that pass:
 
 ```python

@@ -37,3 +37,18 @@ class QuarantineReason(StrEnum):
 
     PICKER_NO_MATCH = "picker_no_match"  # picker ran but rejected every candidate
     NO_DOCUMENTS = "no_documents"        # trial absent from documents/search corpus
+
+
+class DocumentCategory(StrEnum):
+    """Subset of USPTO ODP `documentData.documentCategory` values referenced
+    in code (scan filter, exhibit drop). Values are API-canonical casing.
+
+    The full set on the documents endpoint is ~21 values (PETITION, Paper,
+    OTHER, NOTICE, MOTION, ORDER, RESPONSE, DECISION, FINAL, REPLY, POPR,
+    SURREPLY, ADVRSJUDG, …); add members as code starts to switch on them.
+    """
+
+    PETITION = "PETITION"
+    PAPER = "Paper"
+    EXHIBIT = "Exhibit"
+    EXHIBITS = "Exhibits"
