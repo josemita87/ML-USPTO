@@ -12,7 +12,13 @@ from ml_uspto.parse.petition_picker import pick_petition
 
 
 def doc(number, title, category="Paper"):
-    return {"documentData": {"documentNumber": number, "documentTitleText": title, "documentCategory": category}}
+    return {
+        "documentData": {
+            "documentNumber": number,
+            "documentTitleText": title,
+            "documentCategory": category,
+        }
+    }
 
 
 def test_standard_post_2022_petition():

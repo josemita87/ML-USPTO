@@ -29,7 +29,9 @@ def main() -> None:
     parser.add_argument("--max-pages", type=int, default=None, help="cap pagination for smoke runs")
     args = parser.parse_args()
 
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
 
     trials = local.load_parquet(
         paths.trials_parquet(),

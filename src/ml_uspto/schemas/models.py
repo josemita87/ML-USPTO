@@ -10,7 +10,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from ml_uspto.schemas.enums import QuarantineReason
+from ml_uspto.schemas.enums import PatentQuarantineReason, QuarantineReason
 
 # ---------------------------------------------------------------------------
 # /trials/proceedings
@@ -53,9 +53,7 @@ class Proceeding(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
     trial_number: str = Field(alias="trialNumber")
-    trial_meta_data: TrialMetaData = Field(
-        default_factory=TrialMetaData, alias="trialMetaData"
-    )
+    trial_meta_data: TrialMetaData = Field(default_factory=TrialMetaData, alias="trialMetaData")
     patent_owner_data: PatentOwnerData = Field(
         default_factory=PatentOwnerData, alias="patentOwnerData"
     )
@@ -210,6 +208,27 @@ class QuarantineEntry(BaseModel):
     sample_titles: list[str] = Field(default_factory=list)
 
 
+class PatentQuarantineEntry(BaseModel):
+    """Application whose file wrapper fetch failed or returned no usable record."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    application_number: str
+    reason: PatentQuarantineReason
+    http_status: int | None = None
+    error: str | None = None
+
+
+class PatentFetchResult(BaseModel):
+    """One application fetch outcome emitted by `ingest.fetch.fetch_patents`."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="ignore")
+
+    application_number: str
+    raw_record: dict[str, Any] | None = None
+    quarantine: PatentQuarantineEntry | None = None
+
+
 class Patent(BaseModel):
     """Static-only flatten of `/applications/{appNum}`.
 
@@ -227,9 +246,12 @@ class Patent(BaseModel):
     application_type: str | None = None
     entity_size: str | None = None
     first_inventor_to_file: bool | None = None
+    national_stage: bool | None = None
     n_inventors: int | None = None
+    inventor_country_codes: list[str] = Field(default_factory=list)
     cpc_codes: list[str] = Field(default_factory=list)
     uspc_class_subclass: str | None = None
+    n_attorneys_of_record: int | None = None
     pta_a_delay: int | None = None
     pta_b_delay: int | None = None
     pta_c_delay: int | None = None
@@ -252,6 +274,13 @@ class PatentFeatures(BaseModel):
     cpc_section: str | None = None
     n_events_pre_t0: int = 0
     prosecution_span_days: int | None = None
+    n_pe_pre_t0: int = 0
+    n_ex_pre_t0: int = 0
+    n_aa_pre_t0: int = 0
+    n_ad_pre_t0: int = 0
+    n_iss_pre_t0: int = 0
+    n_maint_pre_t0: int = 0
+    n_other_pre_t0: int = 0
     n_office_actions: int = 0
     n_ids_filings: int = 0
     n_assignments_pre_t0: int = 0

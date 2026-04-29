@@ -5,9 +5,22 @@ field disappears or changes type, validation breaks here before the change
 silently corrupts a downstream feature pipeline.
 """
 
-from datetime import date
+from datetime import date, datetime
 
-from ml_uspto.schemas.models import Proceeding
+from ml_uspto.schemas.enums import PatentQuarantineReason, QuarantineReason
+from ml_uspto.schemas.models import (
+    JoinedTrial,
+    Patent,
+    PatentFeatures,
+    PatentFetchResult,
+    PatentQuarantineEntry,
+    PdfFetchManifestRow,
+    Petition,
+    PetitionTextDoc,
+    PetitionTextFeatures,
+    Proceeding,
+    QuarantineEntry,
+)
 
 SAMPLE_PROCEEDING = {
     "trialNumber": "IPR2026-00339",
@@ -68,21 +81,6 @@ def test_proceeding_ignores_unknown_fields():
 # ---------------------------------------------------------------------------
 
 
-from datetime import datetime
-
-from ml_uspto.schemas.enums import QuarantineReason
-from ml_uspto.schemas.models import (
-    JoinedTrial,
-    Patent,
-    PatentFeatures,
-    PdfFetchManifestRow,
-    Petition,
-    PetitionTextDoc,
-    PetitionTextFeatures,
-    QuarantineEntry,
-)
-
-
 def test_petition_minimal_construction():
     p = Petition(
         trial_number="IPR2024-00123",
@@ -106,6 +104,8 @@ def test_quarantine_entry_default_sample_titles_is_empty():
 def test_patent_features_counters_default_to_zero():
     f = PatentFeatures(trial_number="IPR2024-00123", application_number="14709428")
     assert f.n_events_pre_t0 == 0
+    assert f.n_ex_pre_t0 == 0
+    assert f.n_other_pre_t0 == 0
     assert f.n_office_actions == 0
     assert f.days_grant_to_petition is None
 
@@ -181,4 +181,19 @@ def test_petition_text_features_word_count_optional_others_zero():
 def test_patent_default_cpc_codes_is_empty():
     p = Patent(application_number="14709428")
     assert p.cpc_codes == []
+    assert p.inventor_country_codes == []
     assert p.first_inventor_to_file is None
+
+
+def test_patent_quarantine_and_fetch_result_shape():
+    q = PatentQuarantineEntry(
+        application_number="14709428",
+        reason=PatentQuarantineReason.NOT_FOUND,
+        http_status=404,
+        error="missing",
+    )
+    result = PatentFetchResult(application_number="14709428", quarantine=q)
+
+    assert result.raw_record is None
+    assert result.quarantine is not None
+    assert result.quarantine.reason is PatentQuarantineReason.NOT_FOUND

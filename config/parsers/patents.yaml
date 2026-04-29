@@ -63,3 +63,41 @@ documents:
     document_filing_date: documentData.documentFilingDate
     filing_party: documentData.filingPartyCategory
     file_download_uri: documentData.fileDownloadURI
+
+# Static-only application file-wrapper fields from GET /applications/{appNum}.
+# Dated bags (`eventDataBag`, `assignmentBag`, `parentContinuityBag`) are not
+# flattened here; `parse.patent_aggregator.aggregate_patent` owns the T0 filter.
+# Status-as-of-now fields such as `applicationStatusCode` are intentionally absent.
+patents:
+  columns:
+    application_number: applicationNumberText
+
+    # Bibliographic / static
+    filing_date: applicationMetaData.filingDate
+    effective_filing_date: applicationMetaData.effectiveFilingDate
+    application_type: applicationMetaData.applicationTypeCode
+    entity_size: applicationMetaData.entityStatusData.businessEntityStatusCategory
+    first_inventor_to_file:
+      path: applicationMetaData.firstInventorToFileIndicator
+      transform: yn_bool
+    national_stage:
+      path: applicationMetaData.nationalStageIndicator
+      transform: yn_bool
+    n_inventors:
+      path: applicationMetaData.inventorBag
+      transform: count
+    inventor_country_codes:
+      path: applicationMetaData.inventorBag[].correspondenceAddressBag[].countryCode
+      transform: unique_list
+    cpc_codes: applicationMetaData.cpcClassificationBag
+    uspc_class_subclass: applicationMetaData.uspcSymbolText
+    n_attorneys_of_record:
+      path: recordAttorney.attorneyBag
+      transform: count
+
+    # Patent term adjustment aggregates are frozen at grant.
+    pta_a_delay: patentTermAdjustmentData.aDelayQuantity
+    pta_b_delay: patentTermAdjustmentData.bDelayQuantity
+    pta_c_delay: patentTermAdjustmentData.cDelayQuantity
+    pta_total: patentTermAdjustmentData.adjustmentTotalQuantity
+    pta_applicant_delay: patentTermAdjustmentData.applicantDayDelayQuantity

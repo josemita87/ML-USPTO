@@ -25,6 +25,7 @@ SETTINGS_YAML = CONFIG_DIR / "settings.yaml"
 LABELS_YAML = CONFIG_DIR / "labels.yaml"
 PETITION_PICKER_YAML = CONFIG_DIR / "petition_picker.yaml"
 PARSERS_YAML = CONFIG_DIR / "parsers" / "patents.yaml"
+PATENT_EVENT_CODES_YAML = CONFIG_DIR / "patents" / "event_codes.yaml"
 
 
 def raw_dir() -> Path:
@@ -55,6 +56,14 @@ def petitions_parquet() -> Path:
 
 def petition_quarantine_parquet() -> Path:
     return processed_dir() / "petition_quarantine.parquet"
+
+
+def patents_parquet() -> Path:
+    return processed_dir() / "patents.parquet"
+
+
+def patent_quarantine_parquet() -> Path:
+    return processed_dir() / "patent_quarantine.parquet"
 
 
 def resolve(relative: Path | str) -> Path:

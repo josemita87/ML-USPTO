@@ -1,4 +1,4 @@
-"""Stages 1 + 2 of the ingestion pipeline — paginate, cache, flatten.
+"""Ingestion fetchers — paginate/search, cache, flatten.
 
 Two entrypoints, one shared paginator. Pages are cached page-by-page
 under `data/raw/<stage>/page_NNNN.json` via `clients.local`, so a
@@ -15,14 +15,20 @@ backend swaps (see `clients/local.py`).
     `docs/api/proceedings.md` "Petition coverage and the category-taxonomy
     drift"). Yields raw records lazily so the assembler streams without
     holding the full ~323K-row corpus in memory.
+  - `fetch_patents(client, application_numbers)` → POST
+    `/applications/search` in application-number batches, cache each
+    returned wrapper under `data/raw/patents/{app}.json`, and yield per-app
+    success/quarantine outcomes.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
+from typing import Any
 
 import pandas as pd
+import requests
 
 from ml_uspto import paths
 from ml_uspto.clients import local
@@ -31,6 +37,8 @@ from ml_uspto.ingest.schemas.constants import PETITION_SCAN_CATEGORIES, STAGE_RE
 from ml_uspto.ingest.schemas.enums import Stage
 from ml_uspto.parse.engine import flatten
 from ml_uspto.parse.schemas.enums import Parser
+from ml_uspto.schemas.enums import PatentQuarantineReason
+from ml_uspto.schemas.models import PatentFetchResult, PatentQuarantineEntry
 
 logger = logging.getLogger(__name__)
 
@@ -136,4 +144,179 @@ def fetch_petitions(
     )
 
 
-__all__ = ["fetch_proceedings", "fetch_petitions"]
+def _patent_fetch_error_payload(quarantine: PatentQuarantineEntry) -> dict[str, Any]:
+    return {
+        "applicationNumber": quarantine.application_number,
+        "_fetch_error": quarantine.model_dump(mode="json"),
+    }
+
+
+def _quarantine_from_cached_error(payload: dict[str, Any]) -> PatentQuarantineEntry | None:
+    error = payload.get("_fetch_error")
+    if not isinstance(error, dict):
+        return None
+    return PatentQuarantineEntry.model_validate(error)
+
+
+def _extract_patent_record(
+    payload: dict[str, Any], application_number: str
+) -> dict[str, Any] | None:
+    """Return the single file-wrapper record from an application response."""
+    bag = payload.get("patentFileWrapperDataBag")
+    if isinstance(bag, list) and bag:
+        record = bag[0]
+    else:
+        record = payload
+
+    if not isinstance(record, dict) or not record:
+        return None
+
+    out = dict(record)
+    out.setdefault("applicationNumberText", application_number)
+    return out
+
+
+def _patent_success_payload(record: dict[str, Any]) -> dict[str, Any]:
+    return {"patentFileWrapperDataBag": [record]}
+
+
+def _http_quarantine(
+    application_number: str, exc: requests.HTTPError, reason: PatentQuarantineReason
+) -> PatentQuarantineEntry:
+    response = exc.response
+    status = response.status_code if response is not None else None
+    return PatentQuarantineEntry(
+        application_number=application_number,
+        reason=reason,
+        http_status=status,
+        error=str(exc),
+    )
+
+
+def _chunked(items: list[str], size: int) -> Iterator[list[str]]:
+    for start in range(0, len(items), size):
+        yield items[start : start + size]
+
+
+def _cache_quarantine(quarantine: PatentQuarantineEntry) -> None:
+    local.save(
+        Stage.PATENTS, quarantine.application_number, _patent_fetch_error_payload(quarantine)
+    )
+
+
+def _fetch_patent_batch(
+    client: USPTOClient, application_numbers: list[str]
+) -> Iterator[PatentFetchResult]:
+    try:
+        payload = client.search_applications_post(
+            filters=[{"name": "applicationNumberText", "value": application_numbers}],
+            offset=0,
+            limit=len(application_numbers),
+        )
+    except requests.HTTPError as exc:
+        for app in application_numbers:
+            quarantine = _http_quarantine(app, exc, PatentQuarantineReason.HTTP_ERROR)
+            _cache_quarantine(quarantine)
+            yield PatentFetchResult(application_number=app, quarantine=quarantine)
+        return
+    except requests.RequestException as exc:
+        for app in application_numbers:
+            quarantine = PatentQuarantineEntry(
+                application_number=app,
+                reason=PatentQuarantineReason.REQUEST_ERROR,
+                error=str(exc),
+            )
+            _cache_quarantine(quarantine)
+            yield PatentFetchResult(application_number=app, quarantine=quarantine)
+        return
+
+    records = payload.get("patentFileWrapperDataBag") or []
+    records_by_app: dict[str, dict[str, Any]] = {}
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        app = str(record.get("applicationNumberText") or "").strip()
+        if app:
+            records_by_app[app] = record
+
+    for app in application_numbers:
+        record = records_by_app.get(app)
+        if record is None:
+            quarantine = PatentQuarantineEntry(
+                application_number=app,
+                reason=PatentQuarantineReason.NOT_FOUND,
+                error="Application not returned by /applications/search",
+            )
+            _cache_quarantine(quarantine)
+            yield PatentFetchResult(application_number=app, quarantine=quarantine)
+            continue
+
+        payload = _patent_success_payload(record)
+        local.save(Stage.PATENTS, app, payload)
+        yield PatentFetchResult(
+            application_number=app, raw_record=_extract_patent_record(payload, app)
+        )
+
+
+def fetch_patents(
+    client: USPTOClient,
+    application_numbers: Iterable[str],
+    *,
+    page_size: int,
+    max_apps: int | None = None,
+) -> Iterator[PatentFetchResult]:
+    """Fetch application file wrappers by application number with per-app caching.
+
+    Uncached applications are fetched in batches through `/applications/search`
+    filtered by `applicationNumberText`. Successes cache one raw wrapper payload
+    under `data/raw/patents/{application_number}.json`; missing applications and
+    request failures cache explicit fetch-error payloads so reruns do not
+    repeatedly hit known-missing apps.
+    """
+    apps: list[str] = []
+    seen: set[str] = set()
+    for raw_app in application_numbers:
+        app = str(raw_app).strip()
+        if not app or app in seen:
+            continue
+        seen.add(app)
+        apps.append(app)
+        if max_apps is not None and len(apps) >= max_apps:
+            break
+
+    pending: list[str] = []
+    for app in apps:
+        payload = local.load_if_present(Stage.PATENTS, app)
+        if payload is None:
+            pending.append(app)
+            continue
+
+        logger.debug("Patent application %s cache hit", app)
+        cached_quarantine = _quarantine_from_cached_error(payload)
+        if cached_quarantine is not None:
+            yield PatentFetchResult(application_number=app, quarantine=cached_quarantine)
+            continue
+
+        record = _extract_patent_record(payload, app)
+        if record is None:
+            quarantine = PatentQuarantineEntry(
+                application_number=app,
+                reason=PatentQuarantineReason.EMPTY_RESPONSE,
+                error="No patentFileWrapperDataBag record in response",
+            )
+            yield PatentFetchResult(application_number=app, quarantine=quarantine)
+            continue
+
+        yield PatentFetchResult(application_number=app, raw_record=record)
+
+    if page_size <= 0:
+        raise ValueError("page_size must be positive")
+
+    for batch in _chunked(pending, page_size):
+        logger.info("Fetching %d patent applications via /applications/search", len(batch))
+        yield from _fetch_patent_batch(client, batch)
+
+    logger.info("Fetched %d patent application outcomes", len(apps))
+
+
+__all__ = ["fetch_proceedings", "fetch_petitions", "fetch_patents"]

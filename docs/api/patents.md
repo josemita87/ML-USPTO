@@ -8,7 +8,8 @@ Probe on 2026-04-27 against `applicationNumberText=14709428` (the patent in IPR2
 
 | Path | Returns | Top-level keys (non-empty) |
 |---|---|---|
-| `/applications/{app}` *(base)* | full file wrapper | `applicationMetaData`, `eventDataBag`, `parentContinuityBag`, `assignmentBag`, `patentTermAdjustmentData`, `recordAttorney`, `grantDocumentMetaData`, `correspondenceAddressBag`, `lastIngestionDateTime` |
+| `/applications/{app}` *(base)* | full file wrapper for one application | `applicationMetaData`, `eventDataBag`, `parentContinuityBag`, `assignmentBag`, `patentTermAdjustmentData`, `recordAttorney`, `grantDocumentMetaData`, `correspondenceAddressBag`, `lastIngestionDateTime` |
+| `/applications/search` | full file-wrapper search results | `count`, `patentFileWrapperDataBag` |
 | `/applications/{app}/transactions` | events only | `eventDataBag` |
 | `/applications/{app}/adjustment` | PTA only | `patentTermAdjustmentData` |
 | `/applications/{app}/continuity` | family only | `parentContinuityBag` |
@@ -17,7 +18,7 @@ Probe on 2026-04-27 against `applicationNumberText=14709428` (the patent in IPR2
 | `/applications/{app}/attorney` | attorneys only | `recordAttorney` |
 | `/applications/{app}/documents` | filing PDFs (different shape — `documentBag`) | `documentBag` |
 
-**The base path returns the union of the sub-paths.** The 7 sub-paths are narrow projections of the same `patentFileWrapperDataBag` record. Same cost-shape lesson as `proceedings/search`: prefer one base call per application over seven targeted calls. Sub-paths are useful only for incremental refresh of one slice (e.g., re-pull just the assignment bag for an existing record).
+**The base path returns the union of the sub-paths.** The 7 sub-paths are narrow projections of the same `patentFileWrapperDataBag` record. Same cost-shape lesson as `proceedings/search`: prefer the full wrapper over seven targeted calls. For corpus ingest, use `/applications/search` filtered by `applicationNumberText` so one request can return up to the configured page/batch size of wrappers. Sub-paths are useful only for incremental refresh of one slice (e.g., re-pull just the assignment bag for an existing record).
 
 ## Match key
 
@@ -99,7 +100,7 @@ The full event-code dictionary is large (the probed patent alone has 47 distinct
 |---|---|---|
 | **A1** | **Classification encoding = `technologyCenterNumber` (already from proceedings) + CPC section letter (first letter of any `cpcClassificationBag` entry).** No CPC subclass, no full-code one-hot, no USPC. | TC alone smudges the software-vs-hardware split inside one center; full CPC has 250K leaves and 60+ codes per patent — too sparse. Section-only adds 8 dimensions on top of TC, captures the technology-area signal that drives PTAB FWD-rate variation, and stays interpretable. Confirmed 2026-04-27 after probing the bag (66 codes on the sample patent collapsed cleanly to sections H + G). |
 | A2 | Multi-section patents → use **section of the first CPC code** as the primary, optionally a multi-hot section vector if the model can use it. The first CPC is the examiner's primary classification. | The probed patent's first code is `H04W 88/06` (wireless networks) — that matches `technologyCenterNumber=2400` (TC 2400 = networks/multiplex). Empirical alignment confirms first-CPC = primary. |
-| A3 | One base call per application; sub-paths only used for incremental refresh. | Base call = union of sub-paths (probe table above). Sub-paths cost the same per call. |
+| A3 | Batch file-wrapper fetches through `/applications/search`; sub-paths only used for incremental refresh. | Search returns the same full-wrapper bag shape as the base path and reduces request count from O(applications) to O(applications / page_size). |
 | A4 | Dedup fetch by `applicationNumberText`, not `trialNumber`. | Joinder cases attach multiple trials to the same patent; per-trial fetching duplicates. |
 | A5 | T₀-filter applied at parse time, not at feature time. | The filter is a property of the API surface (events / assignments are interleaved with post-T₀ data). Pushing it downstream risks silent re-leakage during feature engineering. |
 | A6 | Aggregate event codes by prefix family (`M*`, `CT*`, `TRIAL*`, ...), not by enumerating codes. | The full code dictionary is undocumented and varies by examination era; families are stable. Final family list locked in `config/patents/event_codes.yaml` after corpus probe. |
@@ -107,14 +108,14 @@ The full event-code dictionary is large (the probed patent alone has 47 distinct
 ## Recommended ingestion flow
 
 1. **From the proceedings frame**, build the unique set `apps = {row.applicationNumberText for row in proceedings}` (~10–13K applications across ~18K IPRs after joinder dedup).
-2. **For each application**, `GET /applications/{app}` once. Cache raw response in `data/raw/patents/{app}.json`. Rate-limit bucket: same `/api/v1/patent/*` family as proceedings.
+2. **For each uncached batch of applications**, `POST /applications/search` filtered by `applicationNumberText`. Cache each returned wrapper under `data/raw/patents/{app}.json`. Rate-limit bucket: same `/api/v1/patent/*` family as proceedings.
 3. **Flatten via `parse.engine.flatten(records, "patents")`** with a new `config/parsers/patents.yaml` mapping the static paths from the table above. The parser config does *not* try to flatten the dated bags directly — those go through a dedicated aggregator step.
 4. **Aggregate the dated bags** in a second pass, parameterized by `petitionFilingDate` (joined in from proceedings on `applicationNumberText`). Output one `PatentFeatures` row per `(trialNumber, applicationNumberText)`. T₀-filter is applied here, once, in code that lives next to the parser.
 5. **Schema**: one `Patent` model in `schemas/models.py` for the raw flatten + a `PatentFeatures` model for the aggregations. Two layers because the raw flatten still has variable-length bags; the feature row is one fixed shape.
 
 ## Cost model
 
-~10–13K unique applications × 1 call each = **~13K calls** total, paginated 1 record per call (no list endpoint at the application level). With the `/api/v1/patent/applications/*` rate bucket (serial, burst=1, plus 5s back-off on 429), expect ~3–4 hours wall-clock for a full enrichment pass — comparable to one corpus-wide proceedings sweep. Caching by `applicationNumberText` keeps re-runs cheap.
+~10–13K unique applications / configured batch size. The live API rejects `pagination.limit > 100`, so with `page_size=100` the current 11,844-application corpus is about **119 search calls** plus cache reads, not 11,844 individual GETs. Caching by `applicationNumberText` keeps re-runs cheap.
 
 ## What this endpoint is NOT for
 

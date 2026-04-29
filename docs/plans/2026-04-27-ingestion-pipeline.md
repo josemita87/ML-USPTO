@@ -1,7 +1,7 @@
 # Ingestion Pipeline — Systems Plan
 
 **Date**: 2026-04-27 (v1 scope narrowed 2026-04-28)
-**Status**: design — plumbing landed in PR 1 (commit `97d11e3`); stages 1–4 in flight.
+**Status**: stages 1–3 landed (proceedings, petitions, patents cold-runs validated); stage 4 (join) is the only v1 step remaining.
 **Scope (v1)**: end-to-end ingestion from "no local data" to a feature-ready parquet keyed by `trialNumber`, joining proceedings + petition pointer + patent. **Metadata-only.** PDF download and petition-text feature extraction (the original stages 5–6) are deferred to v2 — see `### v1 cut` below.
 
 The original plan covered six stages. v1 stops at stage 4 (the join). This document still describes the 4-stage metadata pipeline; deleted text covers what v1 deliberately omits.
@@ -333,9 +333,9 @@ Each step independently runnable + verifiable.
 4. ✅ **Rewrite `ingest/fetch.py::fetch_proceedings`**. Cold-run validated ~18K rows in `trials.parquet`; cache hits on rerun.
 5. ✅ **Add `parse/petition_assembler.py`** + unit tests covering picker hits, quarantine paths, T₀ cross-check.
 6. ✅ **Add `ingest/fetch.py::fetch_petitions`**. Cold-run via `drivers/run_ingest_petitions.py`; verify ~17.8K petitions + ~230 quarantine; spot-check picks against the picker regression suite.
-7. **Add the `patents` surface to `config/parsers/patents.yaml`** + `config/patents/event_codes.yaml`.
-8. **Add `parse/patent_aggregator.py`** + unit test on the IPR2022-01002 probe payload (`patents.md`) with hand-computed expected values, including `TRIALFWD` event drop.
-9. **Add `ingest/fetch.py::fetch_patents`** + `drivers/run_ingest_patents.py`. 100-app subset first; then full run.
+7. ✅ **Add the `patents` surface to `config/parsers/patents.yaml`** + `config/patents/event_codes.yaml`.
+8. ✅ **Add `parse/patent_aggregator.py`** + unit test on the IPR2022-01002 probe payload (`patents.md`) with hand-computed expected values, including `TRIALFWD` event drop.
+9. ✅ **Add `ingest/fetch.py::fetch_patents`** + `drivers/run_ingest_patents.py`. Cold-run produced `data/processed/patents.parquet` + `patent_quarantine.parquet`.
 10. **Add `ingest/fetch.py::join_all`** + `drivers/run_join.py`. Verify final parquet row count = `len(trials) - len(quarantine)`.
 
 > **v2 (deferred, not part of this plan's execution)**: `clients/uspto.py::download_pdf` / `stream_pdf` → `ingest/fetch_petition_pdfs.py` (~10h cold) → `config/petitions/text_patterns.yaml` + `parse/petition_text.py` → `drivers/run_extract_petition_text.py` (Tier 1 + Tier 2 features, ~30 min CPU).

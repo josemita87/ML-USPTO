@@ -18,7 +18,9 @@ def main() -> None:
     parser.add_argument("--max-pages", type=int, default=None, help="cap pagination for smoke runs")
     args = parser.parse_args()
 
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
     df = fetch_proceedings(
         USPTOClient(),
         page_size=get_settings().api.page_size,

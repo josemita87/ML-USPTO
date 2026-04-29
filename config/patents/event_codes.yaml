@@ -1,0 +1,135 @@
+# Event-code taxonomy for `eventDataBag` aggregation.
+#
+# Each event in a patent's file wrapper carries a 4-to-8 character `eventCode`
+# (DOCK, CTNF, M2551, ...). USPTO publishes ~1,873 distinct codes across
+# 275M historical events. We bucket them into 6 categories + a TRIAL ban
+# list and emit per-category counts as features (`n_ex_pre_t0`,
+# `n_aa_pre_t0`, ...) instead of one column per raw code.
+#
+# Categories (USPTO Appendix B official taxonomy + 2 additions):
+#   EX     examination          office actions, IDS, RCE, allowance
+#   AA     applicant actions    amendments, petitions, applicant fees
+#   PE     pre-examination      filing receipt, scanning, OIPE
+#   AD     administrative       emails, electronic review, indicators
+#   ISS    issuance             drawings, ready-for-issue, issue fee
+#   MAINT  maintenance fees     post-grant fee events (added — not in Appendix B)
+#   TRIAL  banned               TRIALFWD is the label — entire category dropped
+#
+# Coverage validated 2026-04-28 against 90 random patents from
+# `data/processed/trials.parquet`: 81.3% of non-TRIAL events fall into a
+# named category, 18.7% into OTHER. Median per-patent OTHER fraction is
+# 18.6% (IQR 12.8%–23.5%). After the first full corpus run we should
+# frequency-rank the OTHER tail and promote the top-N codes here.
+#
+# Confidence annotations on each entry (HIGH / MED / LOW) reflect how
+# grounded the category assignment is. LOW entries are best-guess
+# classifications worth reverifying once we have an authoritative
+# code dictionary loaded.
+
+banned_categories:
+  - TRIAL
+
+banned_prefixes:
+  - TRIAL
+
+# Code → category mapping. Unknown codes default to OTHER at lookup time.
+# Codes are matched exactly (no prefix matching — `M327` is NOT a maintenance
+# fee event despite the M prefix, so prefix-based bucketing is unreliable).
+codes:
+  # ----- EX: examination events -----
+  DOCK:     EX  # HIGH — Docket new application
+  FWDX:     EX  # HIGH — Forward to examiner
+  CTNF:     EX  # HIGH — Non-Final Rejection
+  MCTNF:    EX  # HIGH — Mailed Non-Final Rejection
+  CTFR:     EX  # HIGH — Final Rejection
+  MCTFR:    EX  # HIGH — Mailed Final Rejection
+  IDSC:     EX  # HIGH — IDS considered by examiner
+  CNOA:     EX  # HIGH — Notice of Allowance
+  MCNOA:    EX  # HIGH — Mailed Notice of Allowance
+  N271:     EX  # HIGH — Issue notification (allowance + issue fee due)
+  "MN/=.":  EX  # HIGH — Mailed restriction requirement
+  "N/=.":   EX  # HIGH — Restriction requirement
+  "XT/G":   EX  # HIGH — Extension of time granted
+  EIDS.:    EX  # MED  — Electronic IDS docket entry
+  LET.:     EX  # MED  — Letter to applicant from examiner
+  DIST:     EX  # LOW  — Distribute to examiner
+  BRCE:     EX  # MED  — Begin RCE processing
+  RCEX:     EX  # MED  — RCE examined
+  RCAP:     EX  # MED  — RCE-related continuation
+  ABN9:     EX  # LOW  — Abandonment processing
+  MEXAT:    EX  # MED  — Mailed examiner action (sister to EXAT)
+  PTA.RFE:  EX  # LOW  — PTA Request for Examination
+
+  # ----- AA: applicant actions -----
+  WIDS:     AA  # HIGH — IDS filed by applicant
+  M844:     AA  # HIGH — Information Disclosure Statement
+  "A...":   AA  # HIGH — Generic amendment
+  A.PE:     AA  # HIGH — Amendment after Pre-Exam
+  C.AD:     AA  # HIGH — Communication / address change
+  RQPR:     AA  # HIGH — Request for prioritized examination
+  "PA..":   AA  # HIGH — Power of attorney
+  PET.:     AA  # HIGH — Petition filed by applicant
+  A.NE:     AA  # MED  — Amendment Non-Entry
+  A.NA:     AA  # MED  — Amendment Non-Action (sister to A.NE)
+  C.ADB:    AA  # MED  — Communication variant of C.AD
+  C602:     AA  # MED  — 37 CFR §1.602 communication
+  ADDFLFEE: AA  # LOW  — Additional filing fee paid
+
+  # ----- PE: pre-examination -----
+  IEXX:     PE  # HIGH — Initial exam complete
+  SCAN:     PE  # HIGH — Application scanned
+  OIPE:     PE  # HIGH — Office of Initial Patent Examination
+  COMP:     PE  # HIGH — Application complete
+  L194:     PE  # HIGH — 37 CFR §1.94 letter
+  FLRCPT.O: PE  # HIGH — Filing Receipt original
+  PGPC:     PE  # HIGH — Pre-grant publication processing
+  FLRCPT.U: PE  # HIGH — Filing Receipt updated
+  FTFI:     PE  # MED  — First-time filing indicator
+  FTFS:     PE  # MED  — First-time filing statement
+
+  # ----- AD: administrative -----
+  EML_NTR:  AD  # HIGH — Email notification (routine)
+  EML_NTF:  AD  # HIGH — Email notification (final)
+  PTAC:     AD  # HIGH — PTA calculation
+  PG-ISSUE: AD  # HIGH — Pre-grant publication issued
+  ELC_RVW:  AD  # LOW  — Electronic review
+  SMAL:     AD  # LOW  — Small-entity indicator
+  PUBTC:    AD  # LOW  — Publication TC notification
+  APPERMS:  AD  # LOW  — Application permissions
+  TSSCOMP:  AD  # LOW  — Time-sensitive stamp complete
+
+  # ----- ISS: issuance -----
+  N084:     ISS # HIGH — Issue fee payment due
+  "PGM/":   ISS # HIGH — Patent grant mailed
+  WPIR:     ISS # HIGH — Workflow patent issue ready
+  PILS:     ISS # HIGH — Patent issue letter sent
+  IFEE:     ISS # HIGH — Issue fee paid
+  D1935:    ISS # MED  — Drawings approved for issue
+  CCRDY:    ISS # MED  — Case ready for issue
+
+  # ----- MAINT: maintenance fees (post-grant) -----
+  # M2551/54/55 = large-entity 3.5/7.5/11.5-year fees.
+  # M1551/52/53 = small/micro-entity equivalents (different fee schedule).
+  # REM. = reminder of upcoming maintenance fee.
+  # EXP. = patent expiration (lapsed for non-payment or term end).
+  M2551:    MAINT  # HIGH
+  M2554:    MAINT  # HIGH
+  M2555:    MAINT  # HIGH
+  M1551:    MAINT  # HIGH
+  M1552:    MAINT  # HIGH
+  M1553:    MAINT  # HIGH
+  REM.:     MAINT  # HIGH
+  EXP.:     MAINT  # HIGH
+
+  # ----- TRIAL: banned (label leakage) -----
+  # TRIALFWD is literally our outcome label. Including any TRIAL* event in
+  # features would leak. The whole category is dropped before aggregation,
+  # not merely T0-filtered, because some TRIAL* codes (TRIALPET) sit on T0.
+  TRIALPET: TRIAL  # HIGH — Petition Requesting Trial (≈ T0)
+  TRIALDEN: TRIAL  # HIGH — Request for Trial Denied
+  TRIALGRT: TRIAL  # HIGH — Request for Trial Granted
+  TRIALFWD: TRIAL  # HIGH — Final Written Decision  ← THE LABEL
+  TRIALDIS: TRIAL  # HIGH — Trial Dismissed
+  TRIALSTL: TRIAL  # HIGH — Trial Settled
+  TRIALCER: TRIAL  # HIGH — Trial certificate issued (post-FWD)
+  TRIALGIP: TRIAL  # HIGH — Trial granted-in-part

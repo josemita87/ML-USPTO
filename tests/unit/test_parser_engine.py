@@ -31,6 +31,40 @@ def test_decisions_parser_loads():
     assert cfg["columns"]["decision_issue_date"] == "decisionData.decisionIssueDate"
 
 
+def test_patents_parser_flattens_static_payload():
+    records = [
+        {
+            "applicationNumberText": "14709428",
+            "applicationMetaData": {
+                "filingDate": "2015-05-11",
+                "effectiveFilingDate": "2000-07-17",
+                "applicationTypeCode": "UTL",
+                "firstInventorToFileIndicator": "Y",
+                "nationalStageIndicator": "N",
+                "inventorBag": [
+                    {"correspondenceAddressBag": [{"countryCode": "US"}]},
+                    {"correspondenceAddressBag": [{"countryCode": "US"}, {"countryCode": "CA"}]},
+                ],
+                "cpcClassificationBag": ["H04W 88/06", "G06F 17/00"],
+            },
+            "patentTermAdjustmentData": {"aDelayQuantity": 1, "adjustmentTotalQuantity": 5},
+            "recordAttorney": {"attorneyBag": [{"name": "A"}, {"name": "B"}]},
+        }
+    ]
+    df = flatten(records, Parser.PATENTS)
+
+    row = df.iloc[0]
+    assert row["application_number"] == "14709428"
+    assert bool(row["first_inventor_to_file"]) is True
+    assert bool(row["national_stage"]) is False
+    assert row["n_inventors"] == 2
+    assert row["inventor_country_codes"] == ["US", "CA"]
+    assert row["cpc_codes"] == ["H04W 88/06", "G06F 17/00"]
+    assert row["n_attorneys_of_record"] == 2
+    assert row["pta_a_delay"] == 1
+    assert row["pta_total"] == 5
+
+
 def test_missing_paths_become_none():
     config = {"columns": {"a": "x.y", "b": "z"}}
     df = flatten_records([{"x": {}}], config)

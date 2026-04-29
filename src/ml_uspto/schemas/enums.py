@@ -36,7 +36,16 @@ class QuarantineReason(StrEnum):
     """Why a trial failed petition assembly. Emitted in `QuarantineEntry.reason`."""
 
     PICKER_NO_MATCH = "picker_no_match"  # picker ran but rejected every candidate
-    NO_DOCUMENTS = "no_documents"        # trial absent from documents/search corpus
+    NO_DOCUMENTS = "no_documents"  # trial absent from documents/search corpus
+
+
+class PatentQuarantineReason(StrEnum):
+    """Why an application file wrapper could not be fetched or parsed."""
+
+    NOT_FOUND = "not_found"
+    HTTP_ERROR = "http_error"
+    REQUEST_ERROR = "request_error"
+    EMPTY_RESPONSE = "empty_response"
 
 
 class DocumentCategory(StrEnum):

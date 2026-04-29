@@ -36,7 +36,8 @@ Picker constants live in `config/petition_picker.yaml` and are exposed via
 
 Usage:
     from ml_uspto.parse.petition_picker import pick_petition
-    rows = client.search_documents_post(filters=[{"name":"trialNumber","value":[t]}])["patentTrialDocumentDataBag"]
+    payload = client.search_documents_post(filters=[{"name": "trialNumber", "value": [t]}])
+    rows = payload["patentTrialDocumentDataBag"]
     petition_row = pick_petition(rows)  # None if nothing matched
 """
 

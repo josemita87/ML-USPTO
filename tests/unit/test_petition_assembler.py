@@ -12,7 +12,9 @@ from ml_uspto.parse.petition_assembler import assemble_petitions
 from ml_uspto.schemas.enums import QuarantineReason
 
 
-def _doc_row(trial, number, title, *, doc_id=None, category="PETITION", uri=None, filing_date="2024-01-15"):
+def _doc_row(
+    trial, number, title, *, doc_id=None, category="PETITION", uri=None, filing_date="2024-01-15"
+):
     return {
         "trialNumber": trial,
         # trialMetaData is intentionally populated to verify the assembler
@@ -24,7 +26,8 @@ def _doc_row(trial, number, title, *, doc_id=None, category="PETITION", uri=None
             "documentTitleText": title,
             "documentCategory": category,
             "documentFilingDate": filing_date,
-            "fileDownloadURI": uri or f"https://api.uspto.gov/api/v1/patent/ptab-files/IPR/{trial}-{number}.pdf",
+            "fileDownloadURI": uri
+            or f"https://api.uspto.gov/api/v1/patent/ptab-files/IPR/{trial}-{number}.pdf",
         },
     }
 
@@ -65,7 +68,9 @@ def test_corrected_petition_loses_to_original_via_picker():
 def test_picker_miss_emits_quarantine_with_sample_titles():
     raw = [
         _doc_row("IPR2024-00003", 1, "Power of Attorney", category="Paper"),
-        _doc_row("IPR2024-00003", 5, "Notice of Filing Date Accorded to Petition", category="Paper"),
+        _doc_row(
+            "IPR2024-00003", 5, "Notice of Filing Date Accorded to Petition", category="Paper"
+        ),
     ]
     trials = _trials_df([("IPR2024-00003", "2024-02-01")])
     petitions, quarantine = assemble_petitions(raw, trials)
@@ -92,8 +97,13 @@ def test_trial_with_no_documents_emits_no_documents_quarantine():
 
 def test_t0_mismatch_logs_warning_but_proceedings_wins(caplog):
     raw = [
-        _doc_row("IPR2024-00005", 2, "Petition for Inter Partes Review",
-                 category="PETITION", filing_date="2024-01-20"),
+        _doc_row(
+            "IPR2024-00005",
+            2,
+            "Petition for Inter Partes Review",
+            category="PETITION",
+            filing_date="2024-01-20",
+        ),
     ]
     trials = _trials_df([("IPR2024-00005", "2024-01-15")])
     with caplog.at_level(logging.WARNING, logger="ml_uspto.parse.petition_assembler"):
@@ -106,8 +116,7 @@ def test_t0_mismatch_logs_warning_but_proceedings_wins(caplog):
 
 def test_t0_match_does_not_warn(caplog):
     raw = [
-        _doc_row("IPR2024-00006", 2, "Petition for Inter Partes Review",
-                 filing_date="2024-04-10"),
+        _doc_row("IPR2024-00006", 2, "Petition for Inter Partes Review", filing_date="2024-04-10"),
     ]
     trials = _trials_df([("IPR2024-00006", "2024-04-10")])
     with caplog.at_level(logging.WARNING, logger="ml_uspto.parse.petition_assembler"):
@@ -144,11 +153,13 @@ def test_mixed_outcomes_one_call():
         _doc_row("IPR-A", 2, "Petition for Inter Partes Review"),
         _doc_row("IPR-B", 1, "Power of Attorney", category="Paper"),
     ]
-    trials = _trials_df([
-        ("IPR-A", "2024-01-15"),  # hit
-        ("IPR-B", "2024-02-15"),  # picker miss
-        ("IPR-C", "2024-03-15"),  # absent from raw
-    ])
+    trials = _trials_df(
+        [
+            ("IPR-A", "2024-01-15"),  # hit
+            ("IPR-B", "2024-02-15"),  # picker miss
+            ("IPR-C", "2024-03-15"),  # absent from raw
+        ]
+    )
     petitions, quarantine = assemble_petitions(raw, trials)
 
     assert {p.trial_number for p in petitions} == {"IPR-A"}
@@ -161,13 +172,14 @@ def test_mixed_outcomes_one_call():
 
 def test_t0_cross_check_handles_pandas_timestamp_column():
     raw = [
-        _doc_row("IPR2024-00008", 2, "Petition for Inter Partes Review",
-                 filing_date="2024-06-01"),
+        _doc_row("IPR2024-00008", 2, "Petition for Inter Partes Review", filing_date="2024-06-01"),
     ]
-    trials = pd.DataFrame({
-        "trial_number": ["IPR2024-00008"],
-        "petition_filing_date": pd.to_datetime(["2024-06-01"]),
-    })
+    trials = pd.DataFrame(
+        {
+            "trial_number": ["IPR2024-00008"],
+            "petition_filing_date": pd.to_datetime(["2024-06-01"]),
+        }
+    )
     petitions, _ = assemble_petitions(raw, trials)
     assert petitions[0].petition_filing_date_doc == date(2024, 6, 1)
 

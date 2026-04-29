@@ -20,17 +20,13 @@ class USPTOClient:
         if settings.api.api_key:
             self.session.headers["X-API-Key"] = settings.api.api_key
 
-    def search_proceedings(
-        self, query: str = "IPR", offset: int = 0, limit: int = 100
-    ) -> dict:
+    def search_proceedings(self, query: str = "IPR", offset: int = 0, limit: int = 100) -> dict:
         """Search proceedings via GET. Query is full-text only."""
         url = f"{self.base_url}/trials/proceedings/search"
         params = {"query": query, "offset": offset, "limit": limit}
         return self._get(url, params)
 
-    def search_decisions(
-        self, query: str = "IPR", offset: int = 0, limit: int = 100
-    ) -> dict:
+    def search_decisions(self, query: str = "IPR", offset: int = 0, limit: int = 100) -> dict:
         url = f"{self.base_url}/trials/decisions/search"
         params = {"query": query, "offset": offset, "limit": limit}
         return self._get(url, params)
@@ -104,6 +100,27 @@ class USPTOClient:
         see `docs/api/proceedings.md`).
         """
         url = f"{self.base_url}/trials/documents/search"
+        body = self._build_body(q, filters, range_filters, fields, facets, sort, offset, limit)
+        return self._post(url, body)
+
+    def search_applications_post(
+        self,
+        *,
+        q: str | None = None,
+        filters: list[dict] | None = None,
+        range_filters: list[dict] | None = None,
+        fields: list[str] | None = None,
+        facets: list[str] | None = None,
+        sort: list[dict] | None = None,
+        offset: int = 0,
+        limit: int = 100,
+    ) -> dict:
+        """Search application file wrappers via POST.
+
+        Use this for batched application-number fetches; returned records share
+        the same `patentFileWrapperDataBag` shape as `get_application`.
+        """
+        url = f"{self.base_url}/applications/search"
         body = self._build_body(q, filters, range_filters, fields, facets, sort, offset, limit)
         return self._post(url, body)
 
