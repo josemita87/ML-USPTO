@@ -14,4 +14,5 @@ class Stage(StrEnum):
     PROCEEDINGS = "proceedings"
     DOCUMENTS_PETITION_SCAN = "documents_petition_scan"
     DECISIONS = "decisions"
+    DECISION_PDFS = "decision_pdfs"
     PATENTS = "patents"

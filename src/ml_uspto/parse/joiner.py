@@ -26,28 +26,15 @@ from datetime import date, datetime
 from typing import Any
 
 import pandas as pd
-from pydantic import BaseModel
 
-from ml_uspto import paths
-from ml_uspto.clients import local
+from ml_uspto.clients.storage import Storage
 from ml_uspto.ingest.schemas.enums import Stage
 from ml_uspto.parse.patent_aggregator import aggregate_patent
 from ml_uspto.parse.preprocessing import preprocess
-from ml_uspto.schemas.models import PatentFeatures
+from ml_uspto.schemas.enums import Frame
+from ml_uspto.schemas.models import JoinReport, PatentFeatures
 
 logger = logging.getLogger(__name__)
-
-
-class JoinReport(BaseModel):
-    """Audit counts for a single `join_all` run."""
-
-    n_trials_input: int
-    n_trials_labeled: int
-    n_petition_quarantine: int
-    n_patent_quarantine: int
-    n_joined: int
-    n_with_patent_features: int
-    n_without_patent_features: int
 
 
 def _to_date(value: Any) -> date | None:
@@ -76,16 +63,8 @@ def _patent_features_columns() -> list[str]:
     ]
 
 
-def _empty_patent_features_dict() -> dict[str, Any]:
-    return {col: None for col in _patent_features_columns()}
-
-
-def _patent_features_to_dict(features: PatentFeatures) -> dict[str, Any]:
-    dump = features.model_dump(mode="python")
-    return {col: dump[col] for col in _patent_features_columns()}
-
-
 def _aggregate_one(
+    storage: Storage,
     application_number: str,
     trial_number: str,
     petition_t0: date,
@@ -98,7 +77,7 @@ def _aggregate_one(
     proceedings-side grant_date (the file wrapper has it as `grantDate`
     too, but proceedings-side is canonical for the join).
     """
-    payload = local.load_if_present(Stage.PATENTS, application_number)
+    payload = storage.load_object(Stage.PATENTS, application_number)
     if payload is None:
         return None
     if "_fetch_error" in payload:
@@ -147,6 +126,7 @@ def _quarantined_trials(petition_quarantine: pd.DataFrame) -> set[str]:
 
 
 def join_all(
+    storage: Storage,
     *,
     trials: pd.DataFrame,
     decisions: pd.DataFrame,
@@ -199,15 +179,16 @@ def join_all(
         grant = _to_date(row.grant_date)
 
         if not app or app in patent_qn or t0 is None:
-            feature_rows.append(_empty_patent_features_dict())
+            feature_rows.append({col: None for col in feature_columns})
             continue
 
-        features = _aggregate_one(app, trial, t0, grant)
+        features = _aggregate_one(storage, app, trial, t0, grant)
         if features is None:
-            feature_rows.append(_empty_patent_features_dict())
+            feature_rows.append({col: None for col in feature_columns})
             continue
 
-        feature_rows.append(_patent_features_to_dict(features))
+        dump = features.model_dump(mode="python")
+        feature_rows.append({col: dump[col] for col in feature_columns})
         n_with_features += 1
 
     features_frame = pd.DataFrame(feature_rows, columns=feature_columns, index=joined.index)
@@ -231,21 +212,17 @@ def join_all(
     return out, report
 
 
-def load_and_join() -> tuple[pd.DataFrame, JoinReport]:
-    """Driver convenience — load every stage 1–3 parquet from the standard
-    paths and call `join_all`. Used by `drivers/run_join.py`."""
-    trials = local.load_parquet(paths.trials_parquet())
-    decisions = local.load_parquet(paths.decisions_parquet())
-    petitions = local.load_parquet(paths.petitions_parquet())
-    petition_quarantine = local.load_parquet(paths.petition_quarantine_parquet())
-    patent_quarantine = local.load_parquet(paths.patent_quarantine_parquet())
+def load_and_join(storage: Storage) -> tuple[pd.DataFrame, JoinReport]:
+    """Driver convenience — load every stage 1–3 frame via `storage` and
+    call `join_all`. Used by `drivers/run_join.py`."""
     return join_all(
-        trials=trials,
-        decisions=decisions,
-        petitions=petitions,
-        petition_quarantine=petition_quarantine,
-        patent_quarantine=patent_quarantine,
+        storage,
+        trials=storage.load_frame(Frame.TRIALS),
+        decisions=storage.load_frame(Frame.DECISIONS),
+        petitions=storage.load_frame(Frame.PETITIONS),
+        petition_quarantine=storage.load_frame(Frame.PETITION_QUARANTINE),
+        patent_quarantine=storage.load_frame(Frame.PATENT_QUARANTINE),
     )
 
 
-__all__ = ["join_all", "load_and_join", "JoinReport"]
+__all__ = ["join_all", "load_and_join"]

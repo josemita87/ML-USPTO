@@ -1,7 +1,7 @@
 # Ingestion Pipeline — Systems Plan
 
-**Date**: 2026-04-27 (v1 scope narrowed 2026-04-28)
-**Status**: stages 1–4 plumbing landed end-to-end. v1 deliverable `data/processed/joined_trials.parquet` produced. Outstanding: full patents cold-run (~120/~10K apps cached), FWD-outcome label resolution (`config/labels.yaml::all_claims_unpatentable_outcomes` matches no actual API value — see `_identify_terminating_fwd` notes).
+**Date**: 2026-04-27 (v1 scope narrowed 2026-04-28; storage backend abstracted 2026-04-29; FWD-PDF label fallback scaffolded 2026-04-29)
+**Status**: stages 1–4 plumbing landed end-to-end. v1 deliverable `data/processed/joined_trials.parquet` produced. Outstanding: full patents cold-run (~120/~10K apps cached); FWD-outcome label resolution — regex + capture map for the FWD-PDF cover page now live in `config/labels.yaml::fwd_pdf_outcome` + `schemas/constants.py::FWD_PDF_*` (validated on 25 stratified FWDs), but the FWD-PDF download driver (under bucket `Stage.DECISION_PDFS`) and the `preprocess` fallthrough that runs the regex are not yet wired.
 **Scope (v1)**: end-to-end ingestion from "no local data" to a feature-ready parquet keyed by `trialNumber`, joining proceedings + petition pointer + patent. **Metadata-only.** PDF download and petition-text feature extraction (the original stages 5–6) are deferred to v2 — see `### v1 cut` below.
 
 The original plan covered six stages. v1 stops at stage 4 (the join). This document still describes the 4-stage metadata pipeline; deleted text covers what v1 deliberately omits.
@@ -10,8 +10,13 @@ The original plan covered six stages. v1 stops at stage 4 (the join). This docum
 > - The cache lives in `clients/local.py`, not `ingest/cache.py`. Local FS is treated as a backend client (sibling of `clients/s3.py`).
 > - `ingest/rate_limit.py` was not created. The 5/10/20-second backoff is now `api.backoff_seconds` in `config/settings.yaml`, consumed by `clients/uspto.py`.
 > - There is no `storage/` directory. File I/O primitives moved into `clients/local.py` alongside the cache.
-> - A new `src/ml_uspto/paths.py` is the single source of truth for filesystem paths (`PROJECT_ROOT`, config-file paths, `raw_dir()`, `processed_dir()`, etc.). All modules import it instead of building paths inline.
-> - Eight new Pydantic seam models shipped in `schemas/models.py` (Petition, QuarantineEntry, Patent, PatentFeatures, JoinedTrial, PdfFetchManifestRow, PetitionTextDoc, PetitionTextFeatures).
+> - A new `src/ml_uspto/paths.py` resolves filesystem roots (`PROJECT_ROOT`, config-file paths, `raw_dir()`, `processed_dir()`). Per-frame parquet helpers were dropped 2026-04-29; frame keys now live in `schemas.enums.Frame` and routing goes through the `Storage` Protocol.
+> - Eight new Pydantic seam models shipped in `schemas/models.py` (Petition, QuarantineEntry, Patent, PatentFeatures, JoinedTrial, PdfFetchManifestRow, PetitionTextDoc, PetitionTextFeatures); `JoinReport` added 2026-04-29.
+>
+> **Storage refactor delta (2026-04-29)**:
+> - `clients/storage.py` defines the backend-agnostic `Storage` Protocol: `load_frame/save_frame` (no bucket — single tabular namespace, keyed by `Frame`), `load_object/save_object/iter_objects` (bucket+key for raw JSON cache), and `load_blob/save_blob/has_blob/blob_path` (bucket+key+ext for binary blobs, e.g. PDFs).
+> - `clients/local.py` is now a `LocalStorage` class implementing that Protocol. Module-level functions (`cache_path`, `load_if_present`, `save`, `save_parquet`, …) are gone.
+> - `ingest/fetch.py` and `parse/joiner.py` take `storage: Storage` as the first argument. Drivers instantiate `LocalStorage()` and pass it down. Tests inject a `tmp_path`-rooted `LocalStorage` instead of monkeypatching module functions.
 >
 > See CLAUDE.md hard rules #1 and #5 for the why.
 
@@ -106,7 +111,7 @@ src/ml_uspto/
   ingest/
     fetch.py                          [REWRITE — stage 1/2/3/4 entrypoints]
     schemas/
-      enums.py                        [DONE — Stage enum (proceedings, documents_petition_scan, patents)]
+      enums.py                        [DONE — Stage enum (proceedings, documents_petition_scan, decisions, patents, decision_pdfs)]
       constants.py                    [DONE — STAGE_RECORDS_KEY, PETITION_SCAN_CATEGORIES]
   parse/
     petition_assembler.py             [DONE — group by trialNumber, run picker]
@@ -122,9 +127,10 @@ config/
 
 drivers/
   run_ingest_proceedings.py           [DONE]
+  run_ingest_decisions.py             [DONE — added when label assembly required the decisions surface]
   run_ingest_petitions.py             [DONE]
-  run_ingest_patents.py               [NEW]
-  run_join.py                         [NEW]
+  run_ingest_patents.py               [DONE]
+  run_join.py                         [DONE]
 
 tests/
   unit/
@@ -147,31 +153,57 @@ No new top-level dirs. All adds land inside `ingest/`, `parse/`, `schemas/`, `cl
 
 The existing six methods cover stages 1–4. PDF-download methods (`download_pdf` / `stream_pdf`) are part of the v2 stage-5 work and not added in v1.
 
-### `clients/local.py` *(DONE in PR 1)*
+### `clients/storage.py` + `clients/local.py` *(rewritten 2026-04-29)*
+
+Backend-agnostic Protocol in `clients/storage.py`:
 
 ```python
-def cache_path(bucket: str, key: str, *, root: Path | None = None) -> Path
-def load_if_present(bucket: str, key: str, *, root: Path | None = None) -> dict | None
-def save(bucket: str, key: str, payload: dict, *, root: Path | None = None) -> None
-def iter_cached(bucket: str, *, root: Path | None = None) -> Iterator[tuple[str, dict]]
+class Storage(Protocol):
+    def load_frame(self, key: Frame, *, columns: list[str] | None = None) -> pd.DataFrame: ...
+    def save_frame(self, df: pd.DataFrame, key: Frame) -> None: ...
+    def load_object(self, bucket: str, key: str) -> dict | None: ...
+    def save_object(self, bucket: str, key: str, payload: dict) -> None: ...
+    def iter_objects(self, bucket: str) -> Iterator[tuple[str, dict]]: ...
+    # binary blobs (e.g. PDFs); the LocalStorage impl exposes these methods —
+    # they will move onto the Protocol when an S3 backend lands.
+    def blob_path(self, bucket: str, key: str, ext: str) -> Path: ...
+    def has_blob(self, bucket: str, key: str, ext: str) -> bool: ...
+    def save_blob(self, bucket: str, key: str, ext: str, payload: bytes) -> None: ...
+    def load_blob(self, bucket: str, key: str, ext: str) -> bytes | None: ...
 ```
 
-Reads/writes JSON under `paths.raw_dir() / <bucket> / <key>.json`. `bucket` is generic `str` — callers pass `Stage.PROCEEDINGS` etc. (StrEnum members are str subclasses). `load_if_present` is the idempotency check — every fetcher hits this before any HTTP call. S3 mapping later: `s3://<bucket>/raw/<key>.json` — same key shape, swap `clients/local.py` for `clients/s3.py`. Also hosts the file-I/O primitives (`save_parquet`, `load_parquet`, `save_json`, `load_json`).
+`LocalStorage` (in `clients/local.py`) implements it: frames go to `processed_root / <frame>.parquet`, objects to `raw_root / <bucket> / <key>.json`, blobs to `raw_root / <bucket> / <key>.<ext>`. Buckets are `Stage` enum values (StrEnum, str subclass); frame keys are `Frame` enum values. `load_object` is the idempotency check — every fetcher hits this before any HTTP call. S3 mapping later: a future `clients/s3.py::S3Storage` implements the same Protocol against `s3://<bucket>/...` — drivers swap which class they instantiate, nothing else changes.
 
 ### Rate limiting *(handled in `config/settings.yaml`, not a dedicated module)*
 
 `api.backoff_seconds: [5, 10, 20]` in `config/settings.yaml`, consumed by `USPTOClient._get`/`_post`. The burst=1 global invariant is enforced by single-process serial scripts; if a future contributor wants to parallelize, the invariant must be reasserted (a lock or a single-writer queue). v1 has no lock.
 
-### `ingest/fetch.py` (rewrite)
+### `ingest/fetch.py` *(takes `storage: Storage` first arg, 2026-04-29)*
 
 ```python
-def fetch_proceedings(client: USPTOClient, *, page_size: int) -> pd.DataFrame
-def fetch_petitions(client: USPTOClient, *, page_size: int) -> Iterator[dict]
-def fetch_patents(client: USPTOClient, trials: pd.DataFrame) -> pd.DataFrame
-def join_all(trials: pd.DataFrame, petitions: pd.DataFrame, patents: pd.DataFrame) -> pd.DataFrame
+def fetch_proceedings(storage: Storage, client: USPTOClient, *, page_size: int, max_pages: int | None = None) -> pd.DataFrame
+def fetch_decisions(storage: Storage, client: USPTOClient, *, page_size: int, max_pages: int | None = None) -> pd.DataFrame
+def fetch_petitions(storage: Storage, client: USPTOClient, *, page_size: int, max_pages: int | None = None) -> Iterator[dict]
+def fetch_patents(storage: Storage, client: USPTOClient, application_numbers: Iterable[str], *, page_size: int, max_apps: int | None = None) -> Iterator[PatentFetchResult]
 ```
 
-Each paginates → caches → flattens via `parse.engine.flatten` → validates row-by-row into a Pydantic model → writes parquet. `fetch_petitions` is a generator; `parse.petition_assembler.assemble_petitions` consumes it. `join_all` left-joins trials ⟕ petitions ⟕ patents on `(trial_number, application_number)`, validates each row into `JoinedTrial`, **drops quarantined trials** (per session decision 2026-04-27).
+Each paginates (caching pages via `storage.load_object` / `storage.save_object`) → flattens via `parse.engine.flatten` → saves the resulting DataFrame via `storage.save_frame(df, Frame.<X>)`. `fetch_petitions` is a generator; `parse.petition_assembler.assemble_petitions` consumes it. `fetch_patents` yields per-app `PatentFetchResult` records (success or quarantine) and caches each raw file wrapper under bucket `Stage.PATENTS`.
+
+The join lives in `parse/joiner.py`, not `ingest/fetch.py` (per CLAUDE.md "pagination + flatten are separate concerns" — `join_all` is pure post-processing, no HTTP):
+
+```python
+def join_all(
+    storage: Storage,
+    *,
+    trials: pd.DataFrame,
+    decisions: pd.DataFrame,
+    petitions: pd.DataFrame,
+    petition_quarantine: pd.DataFrame,
+    patent_quarantine: pd.DataFrame,
+) -> tuple[pd.DataFrame, JoinReport]
+```
+
+Internally: `preprocess(trials, decisions)` → labeled trials with `cancelled` (status-based first; FWD-status falls through to the decisions-side outcome lookup, with the planned FWD-PDF cover-page regex as final fallback) → inner-merge with `petitions` (drops petition-quarantined trials) → per-row `aggregate_patent` via `storage.load_object(Stage.PATENTS, app)` + proceedings-side `days_grant_to_petition` patch. Returns the joined frame plus a `JoinReport` audit struct.
 
 ### `parse/petition_assembler.py` (new)
 
@@ -230,7 +262,7 @@ disallowed_prefixes: ["TRIAL"]
 
 Each is ~10–20 lines: parse args (`--max-pages` for smoke runs), configure logging, instantiate `USPTOClient`, call the corresponding `ingest.fetch.*` function, write the parquet, print row counts. No business logic.
 
-v1 drivers: `run_ingest_proceedings.py` *(DONE)*, `run_ingest_petitions.py` *(DONE)*, `run_ingest_patents.py` *(NEW)*, `run_join.py` *(NEW)*.
+v1 drivers: `run_ingest_proceedings.py` *(DONE)*, `run_ingest_decisions.py` *(DONE — required by `preprocess` for the FWD branch of the label ladder)*, `run_ingest_petitions.py` *(DONE — depends on `Frame.TRIALS` for the proceedings-side T₀ cross-check)*, `run_ingest_patents.py` *(DONE — depends on `Frame.TRIALS.application_number`)*, `run_join.py` *(DONE)*. Each driver instantiates `LocalStorage()` and threads it into the corresponding `ingest.fetch.*` / `parse.joiner.*` call.
 
 ---
 
@@ -251,12 +283,15 @@ data/
       15234567.json                      # ~10–13K files
       …
   processed/
-    trials.parquet                       # one row per trial, with label
-    petitions.parquet                    # one row per trial-with-petition
-    petition_quarantine.parquet          # ~230 rows; review manually
-    patents_static.parquet               # one row per application
-    patents_features.parquet             # one row per (trial, app), T₀-filtered
-    trials_joined.parquet                # final structured frame (excludes quarantine)
+    trials.parquet                       # Frame.TRIALS — one row per trial (proceedings spine)
+    decisions.parquet                    # Frame.DECISIONS — one row per decision paper
+    petitions.parquet                    # Frame.PETITIONS — one row per trial-with-petition
+    petition_quarantine.parquet          # Frame.PETITION_QUARANTINE — ~230 rows; review manually
+    patents.parquet                      # Frame.PATENTS — static-only flatten, one row per application
+    patent_quarantine.parquet            # Frame.PATENT_QUARANTINE — apps with HTTP/empty fetch failures
+    joined_trials.parquet                # Frame.JOINED_TRIALS — final structured frame; per-(trial, app)
+                                         # patent features are inlined via the join loop, not split into
+                                         # a separate patents_features.parquet
 ```
 
 > **v2 (deferred): `data/raw/petitions_pdf/{trial}.pdf` (~70 GB), `data/raw/petitions_pdf/_manifest.parquet`, `data/processed/petition_text/{trial}.json.gz`, `data/processed/petition_features.parquet`** — all PDF/text artifacts. Not produced in v1.
@@ -268,7 +303,7 @@ data/
 | `data/raw/{proceedings,documents_petition_scan,patents}/*.json` | yes (~5 GB) | yes | Idempotency cache; cheap to replicate |
 | `data/processed/*.parquet` | yes (~100 MB) | yes | Feature snapshots |
 
-**S3 mapping**: `s3://<bucket>/raw/<key>.json` is a 1:1 swap of cache backend. `clients/local.py` and a future `clients/s3.py` expose the same `cache_path` / `load_if_present` / `save` / `iter_cached` shape; the fetcher gets a backend flag and stays oblivious to which one it's hitting.
+**S3 mapping**: a future `clients/s3.py::S3Storage` implements the same `Storage` Protocol against `s3://<bucket>/...` — `load_object` / `save_object` / `iter_objects` / `load_frame` / `save_frame` / `*_blob` methods all map to S3 keys with no signature change. Fetchers and the joiner already accept `storage: Storage`, so swapping backends is a one-line driver change.
 
 ---
 
@@ -282,7 +317,7 @@ Per CLAUDE.md hard rule #5, no `dict[str, Any]` flows between stages.
 | Document raw row (picked) → petition frame | `Petition` *(DONE)* | `parse.petition_assembler.assemble_petitions` | stage 4 join |
 | Trials with no picked petition | `QuarantineEntry` *(DONE)* | same | manual review |
 | Patent raw → static frame | `Patent` *(NEW)* | `ingest.fetch.fetch_patents` after `flatten()` | analysis-only |
-| Patent raw + T₀ → feature row | `PatentFeatures` *(NEW)* | `parse.patent_aggregator.aggregate` (canonical T₀-filter) | stage 4 join |
+| Patent raw + T₀ → feature row | `PatentFeatures` *(DONE)* | `parse.patent_aggregator.aggregate_patent` (canonical T₀-filter) | stage 4 join |
 | Final structured frame | `JoinedTrial` *(NEW)* | `ingest.fetch.join_all` | features layer |
 | *v2 dormant:* PDF fetch result | `PdfFetchManifestRow` | (would be) `clients.uspto.stream_pdf` | retry/audit |
 | *v2 dormant:* Tier 0 text artifact | `PetitionTextDoc` | (would be) `parse.petition_text.extract_text` | `compute_features` |
@@ -336,8 +371,10 @@ Each step independently runnable + verifiable.
 7. ✅ **Add the `patents` surface to `config/parsers/patents.yaml`** + `config/patents/event_codes.yaml`.
 8. ✅ **Add `parse/patent_aggregator.py`** + unit test on the IPR2022-01002 probe payload (`patents.md`) with hand-computed expected values, including `TRIALFWD` event drop.
 9. ✅ **Add `ingest/fetch.py::fetch_patents`** + `drivers/run_ingest_patents.py`. Cold-run produced `data/processed/patents.parquet` + `patent_quarantine.parquet`.
-10. ✅ **Stage 4 join** — landed as `parse/joiner.py::join_all` (placed in `parse/` rather than `ingest/fetch.py` per CLAUDE.md "pagination + flatten are separate concerns" — `join_all` is pure post-processing of parquets, no HTTP). Driver `drivers/run_join.py` writes `data/processed/joined_trials.parquet`. Decisions stage 1b added (`fetch_decisions` + `drivers/run_ingest_decisions.py`, ~19K IPR rows) since the `cancelled` label requires it. Cold-run: 17,303 joined rows (= 17,508 labeled − 205 petition-quarantined trials in the labeled subset).
-    - **Open**: `_identify_terminating_fwd` was filtering `decisionTypeCategory` for "Final Written Decision"; empirically that field only carries "Decision"/"Rehearing Decision". Fix routed the marker to `documentTypeDescriptionText`. Now `terminating_outcome` populates correctly, but `config/labels.yaml::all_claims_unpatentable_outcomes` lists a value (`"All Challenged Claims Unpatentable"`) that the API never returns as `trialOutcomeCategory` — the unpatentability determination appears to live in the document title text. As a result 0/5958 FWD-status trials currently label as `cancelled=1`, and corpus-level `cancelled` rate is 0.6% (just `Terminated-Adverse Judgment`). Needs domain-expert reconciliation.
+10. ✅ **Stage 4 join** — landed as `parse/joiner.py::join_all` (placed in `parse/` rather than `ingest/fetch.py` per CLAUDE.md "pagination + flatten are separate concerns" — `join_all` is pure post-processing of frames, no HTTP). Driver `drivers/run_join.py` writes `Frame.JOINED_TRIALS`. Decisions stage 1b added (`fetch_decisions` + `drivers/run_ingest_decisions.py`, ~19K IPR rows) since the `cancelled` label requires it. Cold-run: 17,303 joined rows (= 17,508 labeled − 205 petition-quarantined trials in the labeled subset).
+    - **Open — FWD-outcome label resolution.** `_identify_terminating_fwd` was filtering `decisionTypeCategory` for "Final Written Decision"; empirically that field only carries "Decision"/"Rehearing Decision". Fix routed the marker to `documentTypeDescriptionText`. `terminating_outcome` now populates correctly, but `trialOutcomeCategory` comes back as `"Final Written Decision"` rather than `"All Challenged Claims Unpatentable"` on FWD rows — so the structured-field path leaves 0/5958 FWD-status trials labeled `cancelled=1` (corpus-level rate is 0.6%, all `Terminated-Adverse Judgment`).
+        - **Scaffolded (2026-04-29) but not yet wired**: `config/labels.yaml::fwd_pdf_outcome` defines a regex `Determining\s+(.{2,120}?)\s+Unpatentable` over the FWD cover page (first 4K chars), with capture-word→label map (`All`→1; `No`/`Some`/`Challenged`→0). Validated against a stratified sample of 25 FWDs spanning 2021–2026 × {original, on remand, rehearing, on Remand from Director} × {parseable title, generic title}. Exposed in `schemas/constants.py` as `FWD_PDF_OUTCOME_PATTERN` / `FWD_PDF_COVER_PAGE_SEARCH_CHARS` / `FWD_PDF_CAPTURE_TO_LABEL`; bucket reserved as `Stage.DECISION_PDFS`. The same regex also matches `documentTitleText` for many FWDs (cheap-first path), but neither the FWD-PDF download driver nor the title/PDF call-site in `preprocess` is wired yet.
+        - **Remaining work**: (a) FWD PDF fetcher driver writing under `Stage.DECISION_PDFS` via `storage.save_blob(..., "pdf", ...)`; (b) label-fallthrough step in `preprocess` for FWD-status trials with `terminating_outcome ∉ ALL_CLAIMS_UNPATENTABLE_OUTCOMES` — try the regex on `documentTitleText` first, then on the cover-page text from the cached PDF.
 
 > **v2 (deferred, not part of this plan's execution)**: `clients/uspto.py::download_pdf` / `stream_pdf` → `ingest/fetch_petition_pdfs.py` (~10h cold) → `config/petitions/text_patterns.yaml` + `parse/petition_text.py` → `drivers/run_extract_petition_text.py` (Tier 1 + Tier 2 features, ~30 min CPU).
 

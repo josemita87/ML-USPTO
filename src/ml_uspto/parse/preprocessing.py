@@ -1,13 +1,14 @@
 """Build the binary `cancelled` label per `docs/scope/prediction_scope.md` §3.
 
-Target = 1 iff the trial's *terminating* Final Written Decision held all
+Target = 1 iff the trial's *original* Final Written Decision held all
 challenged claims unpatentable. Everything else (institution denied,
 discretionary denial, settled, procedurally terminated, FWD where any claim
 survived) is 0. Trials still pending are excluded entirely.
 
-The terminating FWD is identified per trial as the latest `decisionIssueDate`
-among rows whose `decision_type` indicates a Final Written Decision (this
-correctly handles remand: a remand FWD wins over the vacated original).
+Per `prediction_scope.md` §3.1, only the original FWD is used as a label
+source; on-remand and rehearing variants are dropped at this stage. See
+the doc for the rationale and the trade-off (~5% of FWD trials have
+amendments; expected label noise ≪1%).
 
 Status/outcome taxonomies live in `config/labels.yaml` and are exposed via
 `ml_uspto.schemas.constants` so they can be revised without code changes.
@@ -20,6 +21,7 @@ import pandas as pd
 from ml_uspto.schemas.constants import (
     ALL_CLAIMS_UNPATENTABLE_OUTCOMES,
     FWD_DECISION_TYPE_MARKER,
+    FWD_ORIGINAL_MARKER,
     NON_FWD_LABEL_0_STATUSES,
     NON_FWD_LABEL_1_STATUSES,
     PENDING_STATUSES,
@@ -32,27 +34,37 @@ logger = logging.getLogger(__name__)
 def _identify_terminating_fwd(decisions: pd.DataFrame) -> pd.DataFrame:
     """Return one row per trial with `trial_number, terminating_outcome`.
 
-    The FWD marker lives in `document_type` (= `documentTypeDescriptionText`,
-    e.g. "Final Written Decision:  original", "Final Written Decision: On
-    remand from the CAFC"). The neighbouring `decision_type` field
-    (= `decisionTypeCategory`) holds only "Decision" / "Rehearing Decision"
-    and is unsuitable as the FWD identifier.
+    Filters to *original* FWDs only — `documentTypeDescriptionText`
+    matching both `FWD_DECISION_TYPE_MARKER` ("Final Written Decision",
+    case-insensitive) and `FWD_ORIGINAL_MARKER` ("original"). On-remand,
+    rehearing, and Director-remand variants are dropped per
+    `docs/scope/prediction_scope.md` §3.1: their cover-page outcomes
+    refer to the remanded/rehearing subset, not the originally-challenged
+    set, so they're not valid label sources.
     """
     empty = pd.DataFrame({"trial_number": [], "terminating_outcome": []})
     if "document_type" not in decisions.columns or decisions.empty:
         return empty
 
-    fwds = decisions[
-        decisions["document_type"]
-        .fillna("")
-        .str.contains(FWD_DECISION_TYPE_MARKER, case=False, regex=False)
-    ].copy()
+    doc_type = decisions["document_type"].fillna("")
+    is_fwd = doc_type.str.contains(FWD_DECISION_TYPE_MARKER, case=False, regex=False)
+    is_original = doc_type.str.contains(FWD_ORIGINAL_MARKER, case=False, regex=False)
+    fwds = decisions[is_fwd & is_original].copy()
+    n_dropped = int((is_fwd & ~is_original).sum())
+    if n_dropped:
+        logger.info(
+            "Dropped %d non-original FWD rows (on-remand / rehearing) per §3.1",
+            n_dropped,
+        )
     if fwds.empty:
         return empty
 
     fwds["decision_issue_date"] = pd.to_datetime(
         fwds["decision_issue_date"], errors="coerce"
     )
+    # An "original" FWD is in principle unique per trial, but if a trial
+    # ends up with multiple original-tagged rows (data drift), pick the
+    # latest issue date — same heuristic as before, now within originals.
     idx = fwds.groupby("trial_number")["decision_issue_date"].idxmax()
     terminating = fwds.loc[idx, ["trial_number", "trial_outcome"]].rename(
         columns={"trial_outcome": "terminating_outcome"}

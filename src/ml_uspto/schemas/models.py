@@ -174,7 +174,7 @@ class AdmissibilityPartition(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Ingestion pipeline seams (see docs/plans/2026-04-27-ingestion-pipeline.md §6)
+# Ingestion pipeline seams (see docs/plans/2026-04-29-ingestion-pipeline.md §6)
 # ---------------------------------------------------------------------------
 
 
@@ -327,6 +327,20 @@ class JoinedTrial(BaseModel):
 
     # Patent seam
     patent_features: PatentFeatures | None = None
+
+
+class JoinReport(BaseModel):
+    """Audit counts for a single `join_all` run."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    n_trials_input: int
+    n_trials_labeled: int
+    n_petition_quarantine: int
+    n_patent_quarantine: int
+    n_joined: int
+    n_with_patent_features: int
+    n_without_patent_features: int
 
 
 class PdfFetchManifestRow(BaseModel):

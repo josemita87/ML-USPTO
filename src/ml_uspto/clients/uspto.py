@@ -187,6 +187,22 @@ class USPTOClient:
             body["sort"] = sort
         return body
 
+    def download_pdf(self, url: str) -> bytes:
+        """Stream a PTAB PDF (`fileDownloadURI`) to bytes.
+
+        Same retry/backoff policy as JSON calls. The X-API-Key header from the
+        session authenticates against `api.uspto.gov/api/v1/patent/ptab-files/...`.
+        """
+        for wait in self.backoff_seconds:
+            resp = self.session.get(url, timeout=120, stream=False)
+            if resp.status_code == 429:
+                logger.warning("Rate limited (429), waiting %ds", wait)
+                time.sleep(wait)
+                continue
+            resp.raise_for_status()
+            return resp.content
+        raise RuntimeError(f"Failed after {len(self.backoff_seconds)} retries: {url}")
+
     def _get(self, url: str, params: dict | None = None) -> dict:
         for wait in self.backoff_seconds:
             resp = self.session.get(url, params=params, timeout=30)

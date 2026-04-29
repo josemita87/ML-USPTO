@@ -1,8 +1,10 @@
 from datetime import date
+from pathlib import Path
 
 import pandas as pd
 import pytest
 
+from ml_uspto.clients.local import LocalStorage
 from ml_uspto.ingest.schemas.enums import Stage
 from ml_uspto.parse.joiner import join_all
 
@@ -92,7 +94,9 @@ def _patent_quarantine_frame() -> pd.DataFrame:
 
 
 @pytest.fixture
-def patent_payloads(monkeypatch) -> dict[str, dict]:
+def storage_with_payloads(tmp_path: Path) -> LocalStorage:
+    """LocalStorage seeded with two patent payloads under bucket=Stage.PATENTS."""
+    storage = LocalStorage(raw_root=tmp_path / "raw", processed_root=tmp_path / "processed")
     payloads: dict[str, dict] = {
         "14000001": {
             "applicationMetaData": {"cpcClassificationBag": ["G06F 17/00"]},
@@ -109,19 +113,14 @@ def patent_payloads(monkeypatch) -> dict[str, dict]:
             ],
         },
     }
-
-    def load_if_present(bucket, key):
-        assert bucket is Stage.PATENTS
-        if key not in payloads:
-            return None
-        return {"patentFileWrapperDataBag": [payloads[key]]}
-
-    monkeypatch.setattr("ml_uspto.parse.joiner.local.load_if_present", load_if_present)
-    return payloads
+    for app, record in payloads.items():
+        storage.save_object(Stage.PATENTS, app, {"patentFileWrapperDataBag": [record]})
+    return storage
 
 
-def test_join_all_excludes_petition_quarantine(patent_payloads):
+def test_join_all_excludes_petition_quarantine(storage_with_payloads):
     df, report = join_all(
+        storage_with_payloads,
         trials=_trials_frame(),
         decisions=_decisions_frame(),
         petitions=_petitions_frame(),
@@ -135,8 +134,9 @@ def test_join_all_excludes_petition_quarantine(patent_payloads):
     assert report.n_joined == 2
 
 
-def test_join_all_assigns_correct_labels(patent_payloads):
+def test_join_all_assigns_correct_labels(storage_with_payloads):
     df, _ = join_all(
+        storage_with_payloads,
         trials=_trials_frame(),
         decisions=_decisions_frame(),
         petitions=_petitions_frame(),
@@ -149,8 +149,9 @@ def test_join_all_assigns_correct_labels(patent_payloads):
     assert by_trial["IPR2022-LABEL_BY_FWD_1"] == 1
 
 
-def test_join_all_aggregates_patent_features_with_t0(patent_payloads):
+def test_join_all_aggregates_patent_features_with_t0(storage_with_payloads):
     df, report = join_all(
+        storage_with_payloads,
         trials=_trials_frame(),
         decisions=_decisions_frame(),
         petitions=_petitions_frame(),
@@ -170,11 +171,12 @@ def test_join_all_aggregates_patent_features_with_t0(patent_payloads):
     assert report.n_with_patent_features == 2
 
 
-def test_join_all_marks_quarantined_apps_without_features(patent_payloads):
+def test_join_all_marks_quarantined_apps_without_features(storage_with_payloads):
     patent_qn = pd.DataFrame(
         [{"application_number": "14000002", "reason": "http_error"}]
     )
     df, report = join_all(
+        storage_with_payloads,
         trials=_trials_frame(),
         decisions=_decisions_frame(),
         petitions=_petitions_frame(),
@@ -189,11 +191,10 @@ def test_join_all_marks_quarantined_apps_without_features(patent_payloads):
     assert report.n_with_patent_features == 1
 
 
-def test_join_all_handles_missing_cache(monkeypatch):
-    monkeypatch.setattr(
-        "ml_uspto.parse.joiner.local.load_if_present", lambda bucket, key: None
-    )
+def test_join_all_handles_missing_cache(tmp_path: Path):
+    empty = LocalStorage(raw_root=tmp_path / "raw", processed_root=tmp_path / "processed")
     df, report = join_all(
+        empty,
         trials=_trials_frame(),
         decisions=_decisions_frame(),
         petitions=_petitions_frame(),

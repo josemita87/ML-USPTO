@@ -1,11 +1,9 @@
 """Constants for `ml_uspto.parse`, sourced from YAML config.
 
-Regexes are compiled once at import; the YAML stores the alternatives so a
-domain expert can revise them without touching Python. Patent event-code
-taxonomy is also loaded here so the aggregator consumes enums, not free strings.
+Patent event-code taxonomy and petition-picker numeric/categorical knobs.
+Compiled regex patterns live in `parse.schemas.patterns`, not here.
 """
 
-import re
 from functools import lru_cache
 
 import yaml
@@ -30,8 +28,6 @@ def _load_patent_event_codes() -> dict:
 _cfg = _load_petition_picker()
 _event_cfg = _load_patent_event_codes()
 
-PETITION_TITLE: re.Pattern[str] = re.compile("|".join(_cfg["title_alternatives"]), re.I)
-BLACKLIST: re.Pattern[str] = re.compile("|".join(_cfg["blacklist_alternatives"]), re.I)
 PAPER_NUMBER_CEILING: int = _cfg["paper_number_ceiling"]
 EXHIBIT_CATEGORIES: frozenset[DocumentCategory] = frozenset(
     DocumentCategory(s) for s in _cfg["exhibit_categories"]

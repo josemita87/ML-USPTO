@@ -3,6 +3,7 @@
 Keeping the taxonomies in YAML lets a domain expert revise the §3 rules of
 `docs/scope/prediction_scope.md` without touching Python. Consumers import
 the frozensets/strings here so there is exactly one Python entry point.
+Compiled regex patterns live in `schemas.patterns`, not here.
 """
 
 from functools import lru_cache
@@ -24,6 +25,9 @@ NON_FWD_LABEL_1_STATUSES: frozenset[str] = frozenset(_labels["non_fwd_label_1_st
 NON_FWD_LABEL_0_STATUSES: frozenset[str] = frozenset(_labels["non_fwd_label_0_statuses"])
 PENDING_STATUSES: frozenset[str] = frozenset(_labels["pending_statuses"])
 FWD_DECISION_TYPE_MARKER: str = _labels["fwd_decision_type_marker"]
+FWD_ORIGINAL_MARKER: str = _labels["fwd_original_marker"]
 ALL_CLAIMS_UNPATENTABLE_OUTCOMES: frozenset[str] = frozenset(
     _labels["all_claims_unpatentable_outcomes"]
 )
+
+FWD_PDF_COVER_PAGE_SEARCH_CHARS: int = int(_labels["fwd_pdf_outcome"]["cover_page_search_chars"])

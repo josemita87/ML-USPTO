@@ -55,14 +55,6 @@ def _group_by_trial(records: Iterable[Mapping[str, Any]]) -> dict[str, list[dict
     return groups
 
 
-def _sample_titles(rows: list[dict]) -> list[str]:
-    out: list[str] = []
-    for row in rows[:QUARANTINE_SAMPLE_TITLES_LIMIT]:
-        dd = row.get("documentData") or {}
-        out.append(dd.get("documentTitleText") or dd.get("documentName") or "")
-    return out
-
-
 def _build_petition(trial_number: str, picked: Mapping[str, Any]) -> Petition:
     dd = picked["documentData"]
     number = dd.get("documentNumber")
@@ -112,12 +104,18 @@ def assemble_petitions(
     for trial_number, rows in groups.items():
         picked = pick_petition(rows)
         if picked is None:
+            sample_titles = [
+                (row.get("documentData") or {}).get("documentTitleText")
+                or (row.get("documentData") or {}).get("documentName")
+                or ""
+                for row in rows[:QUARANTINE_SAMPLE_TITLES_LIMIT]
+            ]
             quarantine.append(
                 QuarantineEntry(
                     trial_number=trial_number,
                     reason=QuarantineReason.PICKER_NO_MATCH,
                     n_candidates=len(rows),
-                    sample_titles=_sample_titles(rows),
+                    sample_titles=sample_titles,
                 )
             )
             continue

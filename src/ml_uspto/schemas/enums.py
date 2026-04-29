@@ -48,6 +48,24 @@ class PatentQuarantineReason(StrEnum):
     EMPTY_RESPONSE = "empty_response"
 
 
+class Frame(StrEnum):
+    """Stable keys for the project's tabular outputs.
+
+    Each member maps to one persisted DataFrame routed through
+    `clients.storage.Storage.{load,save}_frame`. The value is the storage
+    key (no extension; the backend chooses the format). Pipeline-stage
+    object buckets live in `ingest.schemas.enums.Stage`, not here.
+    """
+
+    TRIALS = "trials"
+    DECISIONS = "decisions"
+    PETITIONS = "petitions"
+    PETITION_QUARANTINE = "petition_quarantine"
+    PATENTS = "patents"
+    PATENT_QUARANTINE = "patent_quarantine"
+    JOINED_TRIALS = "joined_trials"
+
+
 class DocumentCategory(StrEnum):
     """Subset of USPTO ODP `documentData.documentCategory` values referenced
     in code (scan filter, exhibit drop). Values are API-canonical casing.

@@ -14,6 +14,7 @@ dependencies = [
     "pydantic-settings>=2.0",
     "matplotlib>=3.8",
     "seaborn>=0.13",
+    "pdfplumber>=0.11.9",
 ]
 
 [project.optional-dependencies]

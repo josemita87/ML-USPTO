@@ -1,22 +1,16 @@
-"""Local-FS client — file I/O primitives + cache-shaped key/value access.
+"""Local filesystem storage backend.
 
-Two related roles in one module so the local-FS backend lives in one
-place, parallel to the future `clients/s3.py`:
+Implements `clients.storage.Storage` against the local FS, with two roots:
 
-1. **I/O primitives** — `save_parquet`/`load_parquet`,
-   `save_json`/`load_json`. Used anywhere that needs to read or write a
-   file. Path resolution lives in `ml_uspto.paths`.
+  - `processed_root` for `Frame` parquets — `<root>/<frame>.parquet`
+  - `raw_root` for object buckets — `<root>/<bucket>/<key>.json`
 
-2. **Object-store cache** — `cache_path`, `load_if_present`, `save`,
-   `iter_cached`. Bucket/key/payload model that mirrors S3, so the same
-   key shape maps 1:1 (`s3://<bucket>/raw/<bucket>/<key>.json`) when we
-   swap backends per
-   `docs/plans/2026-04-27-ingestion-pipeline.md` §4.2.
-
-Bucket strings come from `ingest.schemas.enums.Stage` (StrEnum, str
-subclass) — callers pass `Stage.PROCEEDINGS` directly; the cache treats
-it as opaque text so the client stays free of pipeline-stage knowledge.
+The split mirrors the project's data layout (raw cache vs processed
+outputs). An S3 backend can collapse both into a single bucket with
+prefixes; the Protocol contract is the same.
 """
+
+from __future__ import annotations
 
 import json
 from collections.abc import Iterator
@@ -27,35 +21,7 @@ from typing import Any
 import pandas as pd
 
 from ml_uspto import paths
-
-# ---------------------------------------------------------------------------
-# I/O primitives
-# ---------------------------------------------------------------------------
-
-
-def save_parquet(df: pd.DataFrame, path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_parquet(path, index=False)
-
-
-def load_parquet(path: Path, *, columns: list[str] | None = None) -> pd.DataFrame:
-    return pd.read_parquet(path, columns=columns)
-
-
-def save_json(payload: dict, path: Path) -> None:
-    """Write `payload` as UTF-8 JSON, creating parents as needed.
-
-    Dates and Paths are stringified via `_json_default` so a round-trip with
-    `load_json` preserves shape (dates come back as ISO strings, not `date`).
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as f:
-        json.dump(payload, f, default=_json_default)
-
-
-def load_json(path: Path) -> dict:
-    with path.open("r", encoding="utf-8") as f:
-        return json.load(f)
+from ml_uspto.schemas.enums import Frame
 
 
 def _json_default(obj: Any) -> str:
@@ -66,42 +32,78 @@ def _json_default(obj: Any) -> str:
     raise TypeError(f"Not JSON serializable: {type(obj).__name__}")
 
 
-# ---------------------------------------------------------------------------
-# Object-store cache (bucket/key/payload, mirrors S3)
-# ---------------------------------------------------------------------------
+class LocalStorage:
+    """Default backend — reads/writes under the project's local data dirs.
+
+    `raw_root` and `processed_root` default to `paths.raw_dir()` and
+    `paths.processed_dir()` (settings-driven). Tests pass `tmp_path`-rooted
+    instances to isolate I/O.
+    """
+
+    def __init__(
+        self,
+        *,
+        raw_root: Path | None = None,
+        processed_root: Path | None = None,
+    ) -> None:
+        self._raw_root = raw_root
+        self._processed_root = processed_root
+
+    @property
+    def raw_root(self) -> Path:
+        return self._raw_root if self._raw_root is not None else paths.raw_dir()
+
+    @property
+    def processed_root(self) -> Path:
+        return self._processed_root if self._processed_root is not None else paths.processed_dir()
+
+    def load_frame(
+        self, key: Frame, *, columns: list[str] | None = None
+    ) -> pd.DataFrame:
+        return pd.read_parquet(self.processed_root / f"{key.value}.parquet", columns=columns)
+
+    def save_frame(self, df: pd.DataFrame, key: Frame) -> None:
+        path = self.processed_root / f"{key.value}.parquet"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        df.to_parquet(path, index=False)
+
+    def load_object(self, bucket: str, key: str) -> dict[str, Any] | None:
+        path = self.raw_root / bucket / f"{key}.json"
+        if not path.exists():
+            return None
+        with path.open("r", encoding="utf-8") as f:
+            return json.load(f)
+
+    def save_object(self, bucket: str, key: str, payload: dict[str, Any]) -> None:
+        path = self.raw_root / bucket / f"{key}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as f:
+            json.dump(payload, f, default=_json_default)
+
+    def iter_objects(self, bucket: str) -> Iterator[tuple[str, dict[str, Any]]]:
+        base = self.raw_root / bucket
+        if not base.exists():
+            return
+        for path in sorted(base.glob("*.json")):
+            with path.open("r", encoding="utf-8") as f:
+                yield path.stem, json.load(f)
+
+    def blob_path(self, bucket: str, key: str, ext: str) -> Path:
+        return self.raw_root / bucket / f"{key}.{ext}"
+
+    def has_blob(self, bucket: str, key: str, ext: str) -> bool:
+        return self.blob_path(bucket, key, ext).exists()
+
+    def save_blob(self, bucket: str, key: str, ext: str, payload: bytes) -> None:
+        path = self.blob_path(bucket, key, ext)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
+
+    def load_blob(self, bucket: str, key: str, ext: str) -> bytes | None:
+        path = self.blob_path(bucket, key, ext)
+        if not path.exists():
+            return None
+        return path.read_bytes()
 
 
-def _root(root: Path | None) -> Path:
-    if root is not None:
-        return root
-    return paths.raw_dir()
-
-
-def cache_path(bucket: str, key: str, *, root: Path | None = None) -> Path:
-    return _root(root) / bucket / f"{key}.json"
-
-
-def load_if_present(
-    bucket: str, key: str, *, root: Path | None = None
-) -> dict | None:
-    path = cache_path(bucket, key, root=root)
-    if not path.exists():
-        return None
-    return load_json(path)
-
-
-def save(
-    bucket: str, key: str, payload: dict, *, root: Path | None = None
-) -> None:
-    save_json(payload, cache_path(bucket, key, root=root))
-
-
-def iter_cached(
-    bucket: str, *, root: Path | None = None
-) -> Iterator[tuple[str, dict]]:
-    """Yield `(key, payload)` for every cached entry, sorted by key."""
-    base = _root(root) / bucket
-    if not base.exists():
-        return
-    for path in sorted(base.glob("*.json")):
-        yield path.stem, load_json(path)
+__all__ = ["LocalStorage"]

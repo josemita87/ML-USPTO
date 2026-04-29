@@ -4,13 +4,13 @@
 **Status**: consideration — not a decision. Captures what's recoverable from API metadata vs. what genuinely needs the petition PDF, so the v1 scope can be set deliberately.
 **Scope**: which fields of `schemas.models.PetitionTextFeatures` can be derived without stage 5 (PDF download) + stage 6 (text extraction).
 
-Authoritative companion docs: `../api/api_feature_map.md`, `../api/proceedings.md`, `2026-04-27-ingestion-pipeline.md`.
+Authoritative companion docs: `../api/api_feature_map.md`, `../api/proceedings.md`, `2026-04-29-ingestion-pipeline.md`.
 
 ---
 
 ## 1. Why this note exists
 
-The PDF pipeline (stages 5 + 6 in the ingestion plan) costs ~10 h cold-run wall-clock, ~70 GB local storage, a `pdfplumber` dependency, and ~7-10 working days of extractor + fixture engineering — see `2026-04-27-ingestion-pipeline.md` §2 for the cost model and §4 for the per-feature regex inventory.
+The PDF pipeline (stages 5 + 6 in the ingestion plan) costs ~10 h cold-run wall-clock, ~70 GB local storage, a `pdfplumber` dependency, and ~7-10 working days of extractor + fixture engineering — see `2026-04-29-ingestion-pipeline.md` §2 for the cost model and §4 for the per-feature regex inventory.
 
 Before committing to that, it's worth asking: **of the 14 fields in `PetitionTextFeatures`, how many can be derived from data we already pull at stages 1-2 (proceedings + documents/search)?**
 
@@ -47,7 +47,7 @@ Removing the shortcuttable / partial-shortcut fields leaves a hard core of featu
 3. `n_grounds` (+ `_102` / `_103` split) — argument complexity.
 4. `mentions_fintiv_factors` + `has_sotera_stipulation` (the stipulation-in-body case) — Fintiv-bypass posture.
 
-`claim_construction_disputed_terms` exists in this set on paper but is the lowest-confidence extractor (~60% regex-only, see `2026-04-27-ingestion-pipeline.md` §4). Practically defer to v2 with an LLM extractor or skip entirely.
+`claim_construction_disputed_terms` exists in this set on paper but is the lowest-confidence extractor (~60% regex-only, see `2026-04-29-ingestion-pipeline.md` §4). Practically defer to v2 with an LLM extractor or skip entirely.
 
 So the *real* PDF-only shortlist is **5-6 features**, not 14. The Sotera signal — frequently cited as the headline pre-Fintiv-bypass predictor — is in this list. So is petition word count.
 

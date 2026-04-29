@@ -8,6 +8,7 @@ before any HTTP call, so re-running picks up where Ctrl-C left off.
 import argparse
 import logging
 
+from ml_uspto.clients.local import LocalStorage
 from ml_uspto.clients.uspto import USPTOClient
 from ml_uspto.ingest.fetch import fetch_proceedings
 from ml_uspto.settings import get_settings
@@ -22,6 +23,7 @@ def main() -> None:
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
     df = fetch_proceedings(
+        LocalStorage(),
         USPTOClient(),
         page_size=get_settings().api.page_size,
         max_pages=args.max_pages,

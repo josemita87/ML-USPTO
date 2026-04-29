@@ -56,10 +56,6 @@ def _event_category(code: str) -> EventCategory:
     return EVENT_CODE_CATEGORIES.get(code, EventCategory.OTHER)
 
 
-def _is_banned_event(code: str) -> bool:
-    return _event_category(code) in BANNED_EVENT_CATEGORIES
-
-
 def _event_counts(
     events: list[Mapping[str, Any]], t0: date
 ) -> tuple[dict[EventCategory, int], list[date]]:
@@ -70,9 +66,11 @@ def _event_counts(
         if event_date is None:
             continue
         code = str(event.get("eventCode") or "").strip()
-        if not code or _is_banned_event(code):
+        if not code:
             continue
         category = _event_category(code)
+        if category in BANNED_EVENT_CATEGORIES:
+            continue
         counts[category] += 1
         dates.append(event_date)
     return counts, dates

@@ -1,23 +1,24 @@
 """Ingestion fetchers — paginate/search, cache, flatten.
 
-Two entrypoints, one shared paginator. Pages are cached page-by-page
-under `data/raw/<stage>/page_NNNN.json` via `clients.local`, so a
-re-run after Ctrl-C resumes from the last cached page without
-re-issuing requests. The same key shape maps 1:1 to S3 when the
-backend swaps (see `clients/local.py`).
+Two entrypoints, one shared paginator. Pages and per-app payloads are
+cached object-by-object through the injected `Storage` backend
+(`clients.storage.Storage`), so a re-run after Ctrl-C resumes from the
+last cached object without re-issuing requests. `LocalStorage` puts
+them under `data/raw/<bucket>/<key>.json`; an S3 backend uses the same
+`(bucket, key)` shape against `s3://...`.
 
-  - `fetch_proceedings(client)` → POST `/trials/proceedings/search`
+  - `fetch_proceedings(storage, client)` → POST `/trials/proceedings/search`
     filtered to `trialTypeCode = "IPR"`, flattened with
-    `Parser.PROCEEDINGS`, written to `paths.trials_parquet()`.
-  - `fetch_petitions(client)` → POST `/trials/documents/search` filtered
-    to `documentData.documentCategory IN PETITION_SCAN_CATEGORIES` (set
-    in `config/petition_picker.yaml` — currently PETITION + Paper per
+    `Parser.PROCEEDINGS`, saved as the `Frame.TRIALS` frame.
+  - `fetch_petitions(storage, client)` → POST `/trials/documents/search`
+    filtered to `documentData.documentCategory IN PETITION_SCAN_CATEGORIES`
+    (set in `config/petition_picker.yaml` — currently PETITION + Paper per
     `docs/api/proceedings.md` "Petition coverage and the category-taxonomy
     drift"). Yields raw records lazily so the assembler streams without
     holding the full ~323K-row corpus in memory.
-  - `fetch_patents(client, application_numbers)` → POST
+  - `fetch_patents(storage, client, application_numbers)` → POST
     `/applications/search` in application-number batches, cache each
-    returned wrapper under `data/raw/patents/{app}.json`, and yield per-app
+    returned wrapper under bucket `Stage.PATENTS`, and yield per-app
     success/quarantine outcomes.
 """
 
@@ -30,20 +31,20 @@ from typing import Any
 import pandas as pd
 import requests
 
-from ml_uspto import paths
-from ml_uspto.clients import local
+from ml_uspto.clients.storage import Storage
 from ml_uspto.clients.uspto import USPTOClient
 from ml_uspto.ingest.schemas.constants import PETITION_SCAN_CATEGORIES, STAGE_RECORDS_KEY
 from ml_uspto.ingest.schemas.enums import Stage
 from ml_uspto.parse.engine import flatten
 from ml_uspto.parse.schemas.enums import Parser
-from ml_uspto.schemas.enums import PatentQuarantineReason
+from ml_uspto.schemas.enums import Frame, PatentQuarantineReason
 from ml_uspto.schemas.models import PatentFetchResult, PatentQuarantineEntry
 
 logger = logging.getLogger(__name__)
 
 
 def _paginate_cached(
+    storage: Storage,
     client_method: Callable[..., dict],
     *,
     filters: list[dict],
@@ -72,11 +73,11 @@ def _paginate_cached(
             logger.info("Stopping %s at page %d (max_pages cap)", bucket.value, pages_done)
             break
         key = f"page_{pages_done:04d}"
-        payload = local.load_if_present(bucket, key)
+        payload = storage.load_object(bucket, key)
         if payload is None:
             logger.info("Fetching %s page %d (offset=%d)", bucket.value, pages_done, offset)
             payload = client_method(filters=filters, offset=offset, limit=page_size)
-            local.save(bucket, key, payload)
+            storage.save_object(bucket, key, payload)
         else:
             logger.debug("%s page %d cache hit", bucket.value, pages_done)
 
@@ -96,9 +97,13 @@ def _paginate_cached(
 
 
 def fetch_proceedings(
-    client: USPTOClient, *, page_size: int, max_pages: int | None = None
+    storage: Storage,
+    client: USPTOClient,
+    *,
+    page_size: int,
+    max_pages: int | None = None,
 ) -> pd.DataFrame:
-    """Fetch all IPR proceedings, flatten, and write `trials.parquet`.
+    """Fetch all IPR proceedings, flatten, and save `Frame.TRIALS`.
 
     Filters via POST on `trialMetaData.trialTypeCode = "IPR"`. The
     flattened columns come from `Parser.PROCEEDINGS` in
@@ -106,6 +111,7 @@ def fetch_proceedings(
     (typically `get_settings().api.page_size`) — no in-function defaults.
     """
     records = _paginate_cached(
+        storage,
         client.search_proceedings_post,
         filters=[{"name": "trialMetaData.trialTypeCode", "value": ["IPR"]}],
         bucket=Stage.PROCEEDINGS,
@@ -113,25 +119,29 @@ def fetch_proceedings(
         max_pages=max_pages,
     )
     df = flatten(records, Parser.PROCEEDINGS)
-    out = paths.trials_parquet()
-    local.save_parquet(df, out)
-    logger.info("Wrote %d proceedings rows → %s", len(df), out)
+    storage.save_frame(df, Frame.TRIALS)
+    logger.info("Wrote %d proceedings rows → frame %s", len(df), Frame.TRIALS.value)
     return df
 
 
 def fetch_decisions(
-    client: USPTOClient, *, page_size: int, max_pages: int | None = None
+    storage: Storage,
+    client: USPTOClient,
+    *,
+    page_size: int,
+    max_pages: int | None = None,
 ) -> pd.DataFrame:
-    """Fetch all IPR decisions, flatten, and write `decisions.parquet`.
+    """Fetch all IPR decisions, flatten, and save `Frame.DECISIONS`.
 
     Filters via POST on `trialMetaData.trialTypeCode = "IPR"`. Same paginator
-    + cache plumbing as `fetch_proceedings`; pages cached under
-    `data/raw/decisions/`. Required to derive the `cancelled` label for trials
+    + cache plumbing as `fetch_proceedings`; pages cached under bucket
+    `Stage.DECISIONS`. Required to derive the `cancelled` label for trials
     with `Final Written Decision` status — `parse.preprocessing` looks up the
     terminating FWD's `trialOutcomeCategory` per trial.
     """
     records = list(
         _paginate_cached(
+            storage,
             client.search_decisions_post,
             filters=[{"name": "trialMetaData.trialTypeCode", "value": ["IPR"]}],
             bucket=Stage.DECISIONS,
@@ -140,14 +150,17 @@ def fetch_decisions(
         )
     )
     df = flatten(records, Parser.DECISIONS)
-    out = paths.decisions_parquet()
-    local.save_parquet(df, out)
-    logger.info("Wrote %d decisions rows → %s", len(df), out)
+    storage.save_frame(df, Frame.DECISIONS)
+    logger.info("Wrote %d decisions rows → frame %s", len(df), Frame.DECISIONS.value)
     return df
 
 
 def fetch_petitions(
-    client: USPTOClient, *, page_size: int, max_pages: int | None = None
+    storage: Storage,
+    client: USPTOClient,
+    *,
+    page_size: int,
+    max_pages: int | None = None,
 ) -> Iterator[dict]:
     """Yield raw document records from the corpus-wide petition scan.
 
@@ -163,26 +176,13 @@ def fetch_petitions(
     all ~323K records.
     """
     return _paginate_cached(
+        storage,
         client.search_documents_post,
         filters=[{"name": "documentData.documentCategory", "value": PETITION_SCAN_CATEGORIES}],
         bucket=Stage.DOCUMENTS_PETITION_SCAN,
         page_size=page_size,
         max_pages=max_pages,
     )
-
-
-def _patent_fetch_error_payload(quarantine: PatentQuarantineEntry) -> dict[str, Any]:
-    return {
-        "applicationNumber": quarantine.application_number,
-        "_fetch_error": quarantine.model_dump(mode="json"),
-    }
-
-
-def _quarantine_from_cached_error(payload: dict[str, Any]) -> PatentQuarantineEntry | None:
-    error = payload.get("_fetch_error")
-    if not isinstance(error, dict):
-        return None
-    return PatentQuarantineEntry.model_validate(error)
 
 
 def _extract_patent_record(
@@ -203,10 +203,6 @@ def _extract_patent_record(
     return out
 
 
-def _patent_success_payload(record: dict[str, Any]) -> dict[str, Any]:
-    return {"patentFileWrapperDataBag": [record]}
-
-
 def _http_quarantine(
     application_number: str, exc: requests.HTTPError, reason: PatentQuarantineReason
 ) -> PatentQuarantineEntry:
@@ -220,19 +216,19 @@ def _http_quarantine(
     )
 
 
-def _chunked(items: list[str], size: int) -> Iterator[list[str]]:
-    for start in range(0, len(items), size):
-        yield items[start : start + size]
-
-
-def _cache_quarantine(quarantine: PatentQuarantineEntry) -> None:
-    local.save(
-        Stage.PATENTS, quarantine.application_number, _patent_fetch_error_payload(quarantine)
+def _cache_quarantine(storage: Storage, quarantine: PatentQuarantineEntry) -> None:
+    storage.save_object(
+        Stage.PATENTS,
+        quarantine.application_number,
+        {
+            "applicationNumber": quarantine.application_number,
+            "_fetch_error": quarantine.model_dump(mode="json"),
+        },
     )
 
 
 def _fetch_patent_batch(
-    client: USPTOClient, application_numbers: list[str]
+    storage: Storage, client: USPTOClient, application_numbers: list[str]
 ) -> Iterator[PatentFetchResult]:
     try:
         payload = client.search_applications_post(
@@ -243,7 +239,7 @@ def _fetch_patent_batch(
     except requests.HTTPError as exc:
         for app in application_numbers:
             quarantine = _http_quarantine(app, exc, PatentQuarantineReason.HTTP_ERROR)
-            _cache_quarantine(quarantine)
+            _cache_quarantine(storage, quarantine)
             yield PatentFetchResult(application_number=app, quarantine=quarantine)
         return
     except requests.RequestException as exc:
@@ -253,7 +249,7 @@ def _fetch_patent_batch(
                 reason=PatentQuarantineReason.REQUEST_ERROR,
                 error=str(exc),
             )
-            _cache_quarantine(quarantine)
+            _cache_quarantine(storage, quarantine)
             yield PatentFetchResult(application_number=app, quarantine=quarantine)
         return
 
@@ -274,18 +270,19 @@ def _fetch_patent_batch(
                 reason=PatentQuarantineReason.NOT_FOUND,
                 error="Application not returned by /applications/search",
             )
-            _cache_quarantine(quarantine)
+            _cache_quarantine(storage, quarantine)
             yield PatentFetchResult(application_number=app, quarantine=quarantine)
             continue
 
-        payload = _patent_success_payload(record)
-        local.save(Stage.PATENTS, app, payload)
+        payload = {"patentFileWrapperDataBag": [record]}
+        storage.save_object(Stage.PATENTS, app, payload)
         yield PatentFetchResult(
             application_number=app, raw_record=_extract_patent_record(payload, app)
         )
 
 
 def fetch_patents(
+    storage: Storage,
     client: USPTOClient,
     application_numbers: Iterable[str],
     *,
@@ -296,8 +293,8 @@ def fetch_patents(
 
     Uncached applications are fetched in batches through `/applications/search`
     filtered by `applicationNumberText`. Successes cache one raw wrapper payload
-    under `data/raw/patents/{application_number}.json`; missing applications and
-    request failures cache explicit fetch-error payloads so reruns do not
+    under bucket `Stage.PATENTS`, key=application_number; missing applications
+    and request failures cache explicit fetch-error payloads so reruns do not
     repeatedly hit known-missing apps.
     """
     apps: list[str] = []
@@ -313,14 +310,15 @@ def fetch_patents(
 
     pending: list[str] = []
     for app in apps:
-        payload = local.load_if_present(Stage.PATENTS, app)
+        payload = storage.load_object(Stage.PATENTS, app)
         if payload is None:
             pending.append(app)
             continue
 
         logger.debug("Patent application %s cache hit", app)
-        cached_quarantine = _quarantine_from_cached_error(payload)
-        if cached_quarantine is not None:
+        error = payload.get("_fetch_error")
+        if isinstance(error, dict):
+            cached_quarantine = PatentQuarantineEntry.model_validate(error)
             yield PatentFetchResult(application_number=app, quarantine=cached_quarantine)
             continue
 
@@ -339,9 +337,10 @@ def fetch_patents(
     if page_size <= 0:
         raise ValueError("page_size must be positive")
 
-    for batch in _chunked(pending, page_size):
+    for start in range(0, len(pending), page_size):
+        batch = pending[start : start + page_size]
         logger.info("Fetching %d patent applications via /applications/search", len(batch))
-        yield from _fetch_patent_batch(client, batch)
+        yield from _fetch_patent_batch(storage, client, batch)
 
     logger.info("Fetched %d patent application outcomes", len(apps))
 

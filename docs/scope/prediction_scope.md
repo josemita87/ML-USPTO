@@ -10,7 +10,7 @@ This document fixes the prediction task, the eligibility rule for features, and 
 
 **Question.** At the moment an IPR petition is filed, what is the probability that the patent will be cancelled?
 
-**Operationally.** Given a petition filed at time T₀, predict whether the **terminating** Final Written Decision (the original FWD, or a FWD-on-remand if the original is vacated by CAFC) will hold *all challenged claims* unpatentable.
+**Operationally.** Given a petition filed at time T₀, predict whether the **original** Final Written Decision will hold *all challenged claims* unpatentable. On-remand and rehearing FWDs are deliberately excluded from the label-source set — see §3.1.
 
 **Single class boundary.** No staged prediction (i.e. no separate "institution decision" model followed by an "outcome given institution" model). One model. One decision. One label per petition.
 
@@ -24,8 +24,8 @@ All features must be **observable at T₀ or earlier**. This is the single invio
 
 | Terminating outcome | Label | Source |
 |---|---|---|
-| FWD — all challenged claims unpatentable | **1** | Terminating decision's `decisionData.trialOutcomeCategory` (decisions endpoint) |
-| FWD — any challenged claim survives | 0 | Same |
+| FWD — all challenged claims unpatentable | **1** | Original FWD's PDF cover page (`Determining All Challenged Claims Unpatentable`) — see §3.1. The structured `decisionData.trialOutcomeCategory` is empty for IPRs (every FWD comes back as the bare string `Final Written Decision`, verified 2026-04-29 cold-run, 0/2,180 FWDs match any granular outcome), so the granular ruling has to come from the PDF. |
+| FWD — any challenged claim survives | 0 | Same — PDF cover says `No`/`Some Challenged Claims Unpatentable` or enumerates a subset. |
 | Institution denied | 0 | `trialStatusCategory == "Institution Denied"` |
 | Discretionary denial | 0 | `trialStatusCategory == "Discretionary Denial"` |
 | Terminated – settled | 0 | `trialStatusCategory == "Terminated-Settled"` |
@@ -34,15 +34,59 @@ All features must be **observable at T₀ or earlier**. This is the single invio
 | Terminated – adverse judgment | **1** | `trialStatusCategory == "Terminated-Adverse Judgment"` — patent owner concession under 37 CFR § 42.73(b); claims are cancelled. Configured in `config/labels.yaml::non_fwd_label_1_statuses`. ⚠ Subject to domain-expert review; revisit alongside the §7 settlement-coding sensitivity test if the "what counts as cancelled?" definition shifts. |
 | Trial still pending | excluded | `trialStatusCategory ∈ {"Pending", "Pending Director Review", "Trial Instituted"}` — all three vocabularies are now in `config/labels.yaml::pending_statuses`. |
 
-> ⚠ **`trialStatusCategory` does not carry the FWD verdict.** For FWD-reaching trials the proceedings endpoint stops at `Final Written Decision` or `Final Written Decision - Appealed` — neither value distinguishes "all claims unpatentable" from "mixed" or "all patentable". The verdict (label 1 vs 0 within FWD-reaching trials) is recoverable only from `decisionData.trialOutcomeCategory` on the decisions endpoint. Empirically this affects ~38% of terminated trials (286 + 92 of 1000 IPR2022 trials sampled) — see `../api/proceedings.md` "The proceedings status stops at FWD reached".
+> ⚠ **`trialStatusCategory` does not carry the FWD verdict.** For FWD-reaching trials the proceedings endpoint stops at `Final Written Decision` or `Final Written Decision - Appealed` — neither value distinguishes "all claims unpatentable" from "mixed" or "all patentable". And the decisions endpoint isn't a structured fallback either: every IPR FWD's `decisionData.trialOutcomeCategory` is the bare string `Final Written Decision` (0/2,180 carry a granular outcome — verified 2026-04-29 cold-run). The verdict for FWD-reaching trials is recoverable only by parsing the PDF cover page. Empirically this affects ~38% of terminated trials (286 + 92 of 1000 IPR2022 trials sampled) — see `../api/proceedings.md` "The proceedings status stops at FWD reached".
 
-The terminating decision is identified per trial as the FWD with the latest `decisionIssueDate` (so on a remand path, the remand FWD wins; the vacated original is not the label source).
+The terminating decision is identified per trial as the **original** FWD; amendments are dropped (see §3.1).
 
 **Settlement coding.** Settled trials are 0: claims are not formally cancelled. Flag this as a sensitivity test (§7) — re-label settled = 1 and check whether the model meaningfully changes.
 
-**Partial-cancellation coding.** Some-but-not-all claims unpatentable → 0. The task is "patent cancelled", not "petitioner partially won". A future regression-style follow-up can target fraction-of-claims-cancelled.
+**Partial-cancellation coding.** Some-but-not-all claims unpatentable → 0. This is a modeling choice tied to the petitioner-sweep framing — see §3.2 for the rationale. A future regression-style follow-up can target fraction-of-claims-cancelled.
 
-**Pending-appeal coding.** If the original FWD is currently on appeal at CAFC and no remand FWD exists yet, exclude the trial from training rather than label from the (potentially-to-be-vacated) original FWD.
+**Pending-appeal coding.** If the original FWD is on appeal at CAFC, label from the original FWD anyway. We do not wait for the remand to land, and we do not switch label sources if the remand vacates part of the original — see §3.1 "Trade-off".
+
+### 3.1 FWD scope: originals only
+
+A single IPR trial can have multiple FWD-tagged decisions in the API. From the 2026-04-29 cold-run (2,180 FWD rows total):
+
+| `documentTypeDescriptionText` | rows | % |
+|---|---|---|
+| `Final Written Decision:  original` | 2,076 | 95.2% |
+| `Final Written Decision: On remand from the CAFC` | 67 | 3.1% |
+| `Final written decision:  On remand` | 17 | 0.8% |
+| `Final Written Decision:  rehearing` | 11 | 0.5% |
+| `Final Written Decision: on Remand from the Director` | 9 | 0.4% |
+
+For label construction we use **only the original FWD** per trial. The four amendment variants (on-remand-CAFC, on-remand, rehearing, on-remand-Director) are dropped at the parse layer; trials whose only FWD in the cache is an amendment are quarantined as label-unresolvable.
+
+**Why originals only.** Amendment FWDs are partial rulings layered on top of the original. Their cover-page outcome refers to the *currently-litigated* claim subset (the claims that came back on remand, or that are addressed in the granted rehearing), **not** the originally-challenged set. Applying our cover-page regex to an amendment in isolation gives the wrong trial-level answer — empirical examples from the 2026-04-29 hand-label sample:
+- `170155370` (on-remand-CAFC): cover says "Determining All Challenged Claims Unpatentable", body's V. ORDER lists only 4 claims (the remanded subset). The original FWD ruled on 20 claims.
+- `171036280` (on-remand-Director): cover says "Determining Only Remanded Challenged Claim Unpatentable" — phrasing only used for amendments. Originally challenged 3–18; only one claim came back.
+- `171062552` (on-remand-CAFC): cover says "Determining Proposed Substitute Claims … Unpatentable" — addresses the patent-owner's Motion-to-Amend substitute claims, not the originally-challenged claims at all.
+- `170553849` (on-remand-CAFC): cover says "Determining Claim 22 Not Unpatentable" — single-claim reversal supplement. The other 21 originally-challenged claims' rulings stand from the original.
+
+The rigorous alternative — layering original + amendments into a combined per-trial outcome — is real infrastructure work for a population that's <5% of FWDs. Out of project scope for v1.
+
+**Trade-off.** Trials whose original FWD was *substantially* vacated on appeal get labelled per the (vacated) original ruling. We accept this. The amendment population (~104 of ~2,180 FWDs, 4.8%) further breaks down:
+- *Partial reversals* (most common) don't move the binary label: original "all unpatentable" + remand "claim X not unpatentable" still has a survival → label was already 0 if there were other surviving claims, or moves 1→0 only if the original was "all unpatentable" with zero survivors and the remand resurrects exactly one.
+- *Full reversals* do move the label, but are rare (CAFC reverses outright in roughly 5% of appeals it hears).
+
+Net expected label noise from this policy: ≪1% of the FWD population. Acceptable for v1; revisit if the model is sensitive to it.
+
+**Settlement-on-remand mislabels.** Some `Final Written Decision: On remand` rows are actually `TERMINATION` documents that the API mislabels as FWDs (e.g., parties settle while a remand is open — the cover says `TERMINATION Due to Settlement on Remand`, never `Determining ...`). The originals-only filter incidentally drops these — they're not real FWDs and shouldn't carry a label.
+
+**Rehearing-denied mislabels.** Similarly, some `Final Written Decision: rehearing` rows are actually denials of a Patent-Owner request for rehearing of the original FWD (cover says `DECISION Denying Patent Owner's Request for Rehearing`, body's ORDER says only "request for rehearing is denied"). These are procedural denials, not new outcomes; the originals-only filter drops them as well.
+
+### 3.2 Business framing: why the binary cut is all-or-nothing
+
+The four cover-page phrasings split into three outcome classes — petitioner sweep, partial, patent-owner sweep — but the label collapses to two: `All Challenged Claims Unpatentable` → 1, everything else → 0. Calling out why, since "Some Challenged Claims Unpatentable" → 0 is the non-obvious case:
+
+- **Petitioner-sweep framing.** An IPR is run to invalidate *the patent*. The asserted claims in the parallel district-court infringement suit are typically the same set the petition challenges — so a partial outcome (claims 1–3 cancelled, claims 4–9 surviving) usually leaves the patent owner with something to assert. The "win" the petitioner is buying is "all challenged claims unpatentable"; partial wins are closer to a draw than a win in business terms. The label answers *"will the petitioner sweep?"*, not *"will any claim be cancelled?"*.
+- **Threshold stability.** "Some" is operationally fuzzy without per-claim adjudication: which claims, what fraction, were they independent or dependent, were they the asserted ones in litigation? The Board's cover-page language doesn't say. Collapsing "Some" → 0 sidesteps that and gives a label that's reproducible from the cover page alone.
+- **Class balance.** Partial outcomes are roughly 5–10% of FWDs (`docs/api/api_feature_map.md` §3 / §3.1 manifest). A 3-class target (all / some / none) creates a tiny middle class with high variance — usually worse models than the binary cut.
+
+**What this choice costs.** Patent-owner-side prediction. From a patent owner's perspective, even one cancelled claim can be a real loss. A model trained on this label is implicitly answering the *petitioner*'s question. The patent-owner question — *"will I walk away unscathed?"* — is the opposite binary cut (1 iff `No Challenged Claims Unpatentable`), and the same regex set distinguishes those three classes already. **Schema-additive escape hatch:** if a future use case wants the patent-owner cut or the 3-class target, expose `outcome ∈ {all_unpatentable, mixed, none_unpatentable}` alongside the binary `cancelled` — `parse.fwd_outcome.extract_outcome` would need to return the per-pattern label rather than collapse to 0/1. The cover-page regex already discriminates the three classes; only the label-collapse step throws information away.
+
+So `Some` → 0 is **defensible and currently canonical**, but worth being explicit that it's a scope decision tied to the question this project is built to answer, not a fact about the data.
 
 ## 4. The leakage rule
 

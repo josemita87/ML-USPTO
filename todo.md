@@ -1,6 +1,6 @@
 # todo.md
 
-Tracking the 2026-04-27 ingestion plan (`docs/plans/2026-04-27-ingestion-pipeline.md`)
+Tracking the 2026-04-27 ingestion plan (`docs/plans/2026-04-29-ingestion-pipeline.md`)
 against the current working tree. Source of truth on **what each piece is for**
 is the plan; this file is just a checklist.
 

@@ -47,11 +47,10 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 from ml_uspto.parse.schemas.constants import (
-    BLACKLIST,
     EXHIBIT_CATEGORIES,
     PAPER_NUMBER_CEILING,
-    PETITION_TITLE,
 )
+from ml_uspto.parse.schemas.patterns import BLACKLIST, PETITION_TITLE
 
 
 def pick_petition(rows: Iterable[Mapping[str, Any]]) -> dict | None:

@@ -10,6 +10,7 @@ driver: page-by-page cache under `data/raw/decisions/`.
 import argparse
 import logging
 
+from ml_uspto.clients.local import LocalStorage
 from ml_uspto.clients.uspto import USPTOClient
 from ml_uspto.ingest.fetch import fetch_decisions
 from ml_uspto.settings import get_settings
@@ -24,6 +25,7 @@ def main() -> None:
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
     df = fetch_decisions(
+        LocalStorage(),
         USPTOClient(),
         page_size=get_settings().api.page_size,
         max_pages=args.max_pages,

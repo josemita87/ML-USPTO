@@ -1,13 +1,13 @@
-"""Stage 3 driver — fetch application file wrappers, write patent parquet outputs.
+"""Stage 3 driver — fetch application file wrappers, write patent frames.
 
-Loads `trials.parquet`, deduplicates `application_number`, fetches file
-wrappers in `/applications/search` batches, then writes:
+Loads the `Frame.TRIALS` frame, deduplicates `application_number`, fetches
+file wrappers in `/applications/search` batches, then writes:
 
-  - `patents.parquet` — static-only flatten via `Parser.PATENTS`
-  - `patent_quarantine.parquet` — applications not returned or otherwise unusable
+  - `Frame.PATENTS` — static-only flatten via `Parser.PATENTS`
+  - `Frame.PATENT_QUARANTINE` — applications not returned or otherwise unusable
 
 Use `--max-apps N` for smoke runs. Per-application raw wrappers are cached
-under `data/raw/patents/{application_number}.json`, so reruns resume cheaply.
+under bucket `Stage.PATENTS`, so reruns resume cheaply.
 """
 
 import argparse
@@ -15,29 +15,14 @@ import logging
 
 import pandas as pd
 
-from ml_uspto import paths
-from ml_uspto.clients import local
+from ml_uspto.clients.local import LocalStorage
 from ml_uspto.clients.uspto import USPTOClient
 from ml_uspto.ingest.fetch import fetch_patents
 from ml_uspto.parse.engine import flatten, load_parser_config
 from ml_uspto.parse.schemas.enums import Parser
+from ml_uspto.schemas.enums import Frame
 from ml_uspto.schemas.models import PatentQuarantineEntry
 from ml_uspto.settings import get_settings
-
-
-def _application_numbers(trials: pd.DataFrame) -> list[str]:
-    apps = trials["application_number"].dropna().astype(str).str.strip()
-    apps = apps[apps != ""]
-    return list(dict.fromkeys(apps))
-
-
-def _empty_patents_frame() -> pd.DataFrame:
-    columns = list(load_parser_config(Parser.PATENTS)["columns"])
-    return pd.DataFrame(columns=columns)
-
-
-def _empty_quarantine_frame() -> pd.DataFrame:
-    return pd.DataFrame(columns=list(PatentQuarantineEntry.model_fields))
 
 
 def main() -> None:
@@ -55,13 +40,16 @@ def main() -> None:
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
 
-    trials = local.load_parquet(paths.trials_parquet(), columns=["application_number"])
-    apps = _application_numbers(trials)
+    storage = LocalStorage()
+    trials = storage.load_frame(Frame.TRIALS, columns=["application_number"])
+    apps_series = trials["application_number"].dropna().astype(str).str.strip()
+    apps = list(dict.fromkeys(apps_series[apps_series != ""]))
 
     records: list[dict] = []
     quarantine: list[PatentQuarantineEntry] = []
     batch_size = args.batch_size or get_settings().api.page_size
     for result in fetch_patents(
+        storage,
         USPTOClient(),
         iter(apps),
         page_size=batch_size,
@@ -72,23 +60,25 @@ def main() -> None:
         if result.quarantine is not None:
             quarantine.append(result.quarantine)
 
-    patents_df = flatten(records, Parser.PATENTS) if records else _empty_patents_frame()
+    patents_df = (
+        flatten(records, Parser.PATENTS)
+        if records
+        else pd.DataFrame(columns=list(load_parser_config(Parser.PATENTS)["columns"]))
+    )
     quarantine_df = (
         pd.DataFrame([q.model_dump(mode="json") for q in quarantine])
         if quarantine
-        else _empty_quarantine_frame()
+        else pd.DataFrame(columns=list(PatentQuarantineEntry.model_fields))
     )
 
-    patents_path = paths.patents_parquet()
-    quarantine_path = paths.patent_quarantine_parquet()
-    local.save_parquet(patents_df, patents_path)
-    local.save_parquet(quarantine_df, quarantine_path)
+    storage.save_frame(patents_df, Frame.PATENTS)
+    storage.save_frame(quarantine_df, Frame.PATENT_QUARANTINE)
 
     attempted = len(records) + len(quarantine)
     print(f"apps attempted: {attempted} / {len(apps)} unique")
     print(f"batch size: {batch_size}")
-    print(f"patents: {len(patents_df)} rows -> {patents_path}")
-    print(f"quarantine: {len(quarantine_df)} rows -> {quarantine_path}")
+    print(f"patents: {len(patents_df)} rows -> frame {Frame.PATENTS.value}")
+    print(f"quarantine: {len(quarantine_df)} rows -> frame {Frame.PATENT_QUARANTINE.value}")
     if attempted:
         print(f"quarantine rate: {len(quarantine_df) / attempted:.1%}")
 

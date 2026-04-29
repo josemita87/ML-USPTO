@@ -135,5 +135,5 @@ The full per-feature catalog and tier demotions live in [`docs/features/admissib
 - [`docs/scope/prediction_scope.md`](docs/scope/prediction_scope.md) — what we predict, T₀ leakage rule, label taxonomy
 - [`docs/scope/domain_notes.md`](docs/scope/domain_notes.md) — full domain notes from practitioner calls
 - [`docs/api/proceedings.md`](docs/api/proceedings.md) — PTAB API proceedings-schema notes
-- [`docs/plans/2026-04-27-ingestion-pipeline.md`](docs/plans/2026-04-27-ingestion-pipeline.md) — six-stage ingestion plan
+- [`docs/plans/2026-04-29-ingestion-pipeline.md`](docs/plans/2026-04-29-ingestion-pipeline.md) — ingestion plan (v1 = 4 stages, metadata-only; PDF stages deferred)
 - [`src/ml_uspto/`](src/ml_uspto/) — package source (`clients/`, `parse/`, `ingest/`, `schemas/`, `paths.py`)

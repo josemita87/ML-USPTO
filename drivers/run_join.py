@@ -1,26 +1,26 @@
 """Stage 4 driver — join trials ⨝ petitions ⨝ patent features.
 
-Reads every stage 1–3 parquet from `paths.processed_dir()` plus the cached
-raw patent payloads under `data/raw/patents/`, runs the canonical T₀-safe
-aggregator per (trial, app), and writes `data/processed/joined_trials.parquet`.
-No HTTP calls — pure post-processing. Run after stages 1–3 are populated.
+Reads every stage 1–3 frame plus the cached raw patent payloads via the
+storage backend, runs the canonical T₀-safe aggregator per (trial, app),
+and writes the `Frame.JOINED_TRIALS` frame. No HTTP calls — pure
+post-processing. Run after stages 1–3 are populated.
 """
 
 import logging
 
-from ml_uspto import paths
-from ml_uspto.clients import local
+from ml_uspto.clients.local import LocalStorage
 from ml_uspto.parse.joiner import load_and_join
+from ml_uspto.schemas.enums import Frame
 
 
 def main() -> None:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
-    df, report = load_and_join()
-    out = paths.joined_trials_parquet()
-    local.save_parquet(df, out)
-    print(f"joined: {len(df)} rows -> {out}")
+    storage = LocalStorage()
+    df, report = load_and_join(storage)
+    storage.save_frame(df, Frame.JOINED_TRIALS)
+    print(f"joined: {len(df)} rows -> frame {Frame.JOINED_TRIALS.value}")
     print(f"  trials in:                   {report.n_trials_input}")
     print(f"  labeled (post-preprocess):   {report.n_trials_labeled}")
     print(f"  petition quarantine:         {report.n_petition_quarantine}")
