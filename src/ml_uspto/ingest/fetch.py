@@ -119,6 +119,33 @@ def fetch_proceedings(
     return df
 
 
+def fetch_decisions(
+    client: USPTOClient, *, page_size: int, max_pages: int | None = None
+) -> pd.DataFrame:
+    """Fetch all IPR decisions, flatten, and write `decisions.parquet`.
+
+    Filters via POST on `trialMetaData.trialTypeCode = "IPR"`. Same paginator
+    + cache plumbing as `fetch_proceedings`; pages cached under
+    `data/raw/decisions/`. Required to derive the `cancelled` label for trials
+    with `Final Written Decision` status — `parse.preprocessing` looks up the
+    terminating FWD's `trialOutcomeCategory` per trial.
+    """
+    records = list(
+        _paginate_cached(
+            client.search_decisions_post,
+            filters=[{"name": "trialMetaData.trialTypeCode", "value": ["IPR"]}],
+            bucket=Stage.DECISIONS,
+            page_size=page_size,
+            max_pages=max_pages,
+        )
+    )
+    df = flatten(records, Parser.DECISIONS)
+    out = paths.decisions_parquet()
+    local.save_parquet(df, out)
+    logger.info("Wrote %d decisions rows → %s", len(df), out)
+    return df
+
+
 def fetch_petitions(
     client: USPTOClient, *, page_size: int, max_pages: int | None = None
 ) -> Iterator[dict]:
@@ -319,4 +346,4 @@ def fetch_patents(
     logger.info("Fetched %d patent application outcomes", len(apps))
 
 
-__all__ = ["fetch_proceedings", "fetch_petitions", "fetch_patents"]
+__all__ = ["fetch_proceedings", "fetch_decisions", "fetch_petitions", "fetch_patents"]

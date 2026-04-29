@@ -58,8 +58,16 @@ def petition_quarantine_parquet() -> Path:
     return processed_dir() / "petition_quarantine.parquet"
 
 
+def decisions_parquet() -> Path:
+    return processed_dir() / "decisions.parquet"
+
+
 def patents_parquet() -> Path:
     return processed_dir() / "patents.parquet"
+
+
+def joined_trials_parquet() -> Path:
+    return processed_dir() / "joined_trials.parquet"
 
 
 def patent_quarantine_parquet() -> Path:

@@ -30,14 +30,25 @@ logger = logging.getLogger(__name__)
 
 
 def _identify_terminating_fwd(decisions: pd.DataFrame) -> pd.DataFrame:
-    """Return one row per trial: the FWD with the latest decision_issue_date."""
+    """Return one row per trial with `trial_number, terminating_outcome`.
+
+    The FWD marker lives in `document_type` (= `documentTypeDescriptionText`,
+    e.g. "Final Written Decision:  original", "Final Written Decision: On
+    remand from the CAFC"). The neighbouring `decision_type` field
+    (= `decisionTypeCategory`) holds only "Decision" / "Rehearing Decision"
+    and is unsuitable as the FWD identifier.
+    """
+    empty = pd.DataFrame({"trial_number": [], "terminating_outcome": []})
+    if "document_type" not in decisions.columns or decisions.empty:
+        return empty
+
     fwds = decisions[
-        decisions["decision_type"]
+        decisions["document_type"]
         .fillna("")
         .str.contains(FWD_DECISION_TYPE_MARKER, case=False, regex=False)
     ].copy()
     if fwds.empty:
-        return fwds.assign(terminating_outcome=pd.Series(dtype="object"))
+        return empty
 
     fwds["decision_issue_date"] = pd.to_datetime(
         fwds["decision_issue_date"], errors="coerce"

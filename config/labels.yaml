@@ -35,9 +35,16 @@ pending_statuses:
   - Pending Director Review
   - Trial Instituted
 
-# decisionTypeCategory substring that identifies a Final Written Decision
-# row. Matches both the original FWD and any remand FWD ("Final Written
-# Decision On CAFC Remand" was observed in IPR2022-01002).
+# `documentTypeDescriptionText` substring that identifies a Final Written
+# Decision row. Matched in `parse.preprocessing._identify_terminating_fwd`.
+# Empirically `decisionTypeCategory` only carries "Decision"/"Rehearing
+# Decision" (~18K rows total, 2026-04-29 cold-run), so the FWD marker has
+# to come from `documentTypeDescriptionText`. Variants we observed:
+#   "Final Written Decision:  original"                   — 2076
+#   "Final Written Decision: On remand from the CAFC"    —   67
+#   "Final written decision:  On remand"                  —   17
+#   "Final Written Decision:  rehearing"                  —   11
+#   "Final Written Decision: on Remand from the Director" —    9
 fwd_decision_type_marker: Final Written Decision
 
 # trialOutcomeCategory values from the *terminating* FWD that map to label 1.

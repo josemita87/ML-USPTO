@@ -21,6 +21,7 @@ from ml_uspto.schemas.enums import DocumentCategory
 STAGE_RECORDS_KEY: dict[Stage, str] = {
     Stage.PROCEEDINGS: "patentTrialProceedingDataBag",
     Stage.DOCUMENTS_PETITION_SCAN: "patentTrialDocumentDataBag",
+    Stage.DECISIONS: "patentTrialDocumentDataBag",
 }
 
 

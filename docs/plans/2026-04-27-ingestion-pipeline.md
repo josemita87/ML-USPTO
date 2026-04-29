@@ -1,7 +1,7 @@
 # Ingestion Pipeline — Systems Plan
 
 **Date**: 2026-04-27 (v1 scope narrowed 2026-04-28)
-**Status**: stages 1–3 landed (proceedings, petitions, patents cold-runs validated); stage 4 (join) is the only v1 step remaining.
+**Status**: stages 1–4 plumbing landed end-to-end. v1 deliverable `data/processed/joined_trials.parquet` produced. Outstanding: full patents cold-run (~120/~10K apps cached), FWD-outcome label resolution (`config/labels.yaml::all_claims_unpatentable_outcomes` matches no actual API value — see `_identify_terminating_fwd` notes).
 **Scope (v1)**: end-to-end ingestion from "no local data" to a feature-ready parquet keyed by `trialNumber`, joining proceedings + petition pointer + patent. **Metadata-only.** PDF download and petition-text feature extraction (the original stages 5–6) are deferred to v2 — see `### v1 cut` below.
 
 The original plan covered six stages. v1 stops at stage 4 (the join). This document still describes the 4-stage metadata pipeline; deleted text covers what v1 deliberately omits.
@@ -336,7 +336,8 @@ Each step independently runnable + verifiable.
 7. ✅ **Add the `patents` surface to `config/parsers/patents.yaml`** + `config/patents/event_codes.yaml`.
 8. ✅ **Add `parse/patent_aggregator.py`** + unit test on the IPR2022-01002 probe payload (`patents.md`) with hand-computed expected values, including `TRIALFWD` event drop.
 9. ✅ **Add `ingest/fetch.py::fetch_patents`** + `drivers/run_ingest_patents.py`. Cold-run produced `data/processed/patents.parquet` + `patent_quarantine.parquet`.
-10. **Add `ingest/fetch.py::join_all`** + `drivers/run_join.py`. Verify final parquet row count = `len(trials) - len(quarantine)`.
+10. ✅ **Stage 4 join** — landed as `parse/joiner.py::join_all` (placed in `parse/` rather than `ingest/fetch.py` per CLAUDE.md "pagination + flatten are separate concerns" — `join_all` is pure post-processing of parquets, no HTTP). Driver `drivers/run_join.py` writes `data/processed/joined_trials.parquet`. Decisions stage 1b added (`fetch_decisions` + `drivers/run_ingest_decisions.py`, ~19K IPR rows) since the `cancelled` label requires it. Cold-run: 17,303 joined rows (= 17,508 labeled − 205 petition-quarantined trials in the labeled subset).
+    - **Open**: `_identify_terminating_fwd` was filtering `decisionTypeCategory` for "Final Written Decision"; empirically that field only carries "Decision"/"Rehearing Decision". Fix routed the marker to `documentTypeDescriptionText`. Now `terminating_outcome` populates correctly, but `config/labels.yaml::all_claims_unpatentable_outcomes` lists a value (`"All Challenged Claims Unpatentable"`) that the API never returns as `trialOutcomeCategory` — the unpatentability determination appears to live in the document title text. As a result 0/5958 FWD-status trials currently label as `cancelled=1`, and corpus-level `cancelled` rate is 0.6% (just `Terminated-Adverse Judgment`). Needs domain-expert reconciliation.
 
 > **v2 (deferred, not part of this plan's execution)**: `clients/uspto.py::download_pdf` / `stream_pdf` → `ingest/fetch_petition_pdfs.py` (~10h cold) → `config/petitions/text_patterns.yaml` + `parse/petition_text.py` → `drivers/run_extract_petition_text.py` (Tier 1 + Tier 2 features, ~30 min CPU).
 
