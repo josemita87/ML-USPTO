@@ -24,3 +24,4 @@ mlruns/
 # Stray local artifacts (one-off downloads at repo root)
 *.zip
 /IPR*.json
+cdk.out/

@@ -1,15 +1,24 @@
 #!/usr/bin/env python3
-"""CDK entry point. Resources are added in later phases."""
+"""CDK entry point.
+
+One stack today (`foundation`); compute + orchestration stacks are
+added in later phases. Account/region come from the active CLI profile
+(`CDK_DEFAULT_ACCOUNT` / `CDK_DEFAULT_REGION` populated by `cdk synth`).
+"""
+
+import os
 
 import aws_cdk as cdk
-from constructs import Construct
 
-
-class MlUsptoStack(cdk.Stack):
-    def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
-        super().__init__(scope, construct_id, **kwargs)
-
+from stacks.foundation import FoundationStack
 
 app = cdk.App()
-MlUsptoStack(app, "MlUsptoStack")
+
+env = cdk.Environment(
+    account=os.environ.get("CDK_DEFAULT_ACCOUNT"),
+    region=os.environ.get("CDK_DEFAULT_REGION"),
+)
+
+FoundationStack(app, "MlUsptoFoundation", env=env)
+
 app.synth()
