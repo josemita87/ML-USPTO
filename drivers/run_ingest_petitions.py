@@ -19,7 +19,7 @@ import pandas as pd
 from ml_uspto.clients.storage.local import LocalStorage
 from ml_uspto.clients.uspto import USPTOClient
 from ml_uspto.ingest.fetch import fetch_petitions
-from ml_uspto.parse.petition_assembler import assemble_petitions
+from ml_uspto.parse.petitions import assemble_petitions
 from ml_uspto.schemas.enums import Frame
 from ml_uspto.settings import get_settings
 
