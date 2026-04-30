@@ -33,11 +33,12 @@ from __future__ import annotations
 import logging
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
-from datetime import date, datetime
+from datetime import date
 from typing import Any
 
 import pandas as pd
 
+from ml_uspto.parse.dates import to_date
 from ml_uspto.parse.petition_picker import pick_petition
 from ml_uspto.parse.schemas.constants import QUARANTINE_SAMPLE_TITLES_LIMIT
 from ml_uspto.schemas.enums import QuarantineReason
@@ -69,19 +70,6 @@ def _build_petition(trial_number: str, picked: Mapping[str, Any]) -> Petition:
     )
 
 
-def _to_date(value: Any) -> date | None:
-    if value is None or (isinstance(value, float) and pd.isna(value)):
-        return None
-    if isinstance(value, datetime):
-        return value.date()
-    if isinstance(value, date):
-        return value
-    try:
-        return pd.Timestamp(value).date()
-    except (ValueError, TypeError):
-        return None
-
-
 def assemble_petitions(
     raw_doc_records: Iterable[Mapping[str, Any]],
     trials: pd.DataFrame,
@@ -96,7 +84,7 @@ def assemble_petitions(
     proceedings_t0: dict[str, date | None] = {}
     if "petition_filing_date" in trials.columns:
         for tn, t0 in trials.set_index("trial_number")["petition_filing_date"].items():
-            proceedings_t0[str(tn)] = _to_date(t0)
+            proceedings_t0[str(tn)] = to_date(t0)
 
     petitions: list[Petition] = []
     quarantine: list[QuarantineEntry] = []

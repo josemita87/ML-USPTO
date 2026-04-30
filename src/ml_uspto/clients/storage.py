@@ -35,5 +35,7 @@ class Storage(Protocol):
 
     def iter_objects(self, bucket: str) -> Iterator[tuple[str, dict[str, Any]]]: ...
 
+    def load_blob(self, bucket: str, key: str, ext: str) -> bytes | None: ...
+
 
 __all__ = ["Storage"]

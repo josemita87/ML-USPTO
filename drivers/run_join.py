@@ -9,7 +9,7 @@ post-processing. Run after stages 1–3 are populated.
 import logging
 
 from ml_uspto.clients.local import LocalStorage
-from ml_uspto.parse.joiner import load_and_join
+from ml_uspto.parse.joiner import join_all
 from ml_uspto.schemas.enums import Frame
 
 
@@ -18,7 +18,14 @@ def main() -> None:
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
     storage = LocalStorage()
-    df, report = load_and_join(storage)
+    df, report = join_all(
+        storage,
+        trials=storage.load_frame(Frame.TRIALS),
+        decisions=storage.load_frame(Frame.DECISIONS),
+        petitions=storage.load_frame(Frame.PETITIONS),
+        petition_quarantine=storage.load_frame(Frame.PETITION_QUARANTINE),
+        patent_quarantine=storage.load_frame(Frame.PATENT_QUARANTINE),
+    )
     storage.save_frame(df, Frame.JOINED_TRIALS)
     print(f"joined: {len(df)} rows -> frame {Frame.JOINED_TRIALS.value}")
     print(f"  trials in:                   {report.n_trials_input}")

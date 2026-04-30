@@ -178,6 +178,8 @@ For each family except `TRIAL`, we emit `n_<family>_pre_t0` plus a sanity-check 
 ### `days_since_last_assignment`
 **What**: `T₀ − max(assignmentRecordedDate)` over pre-T₀ rows. **Signal**: weak/moderate. A recent ownership transfer right before the IPR (e.g., 30 days) often signals a litigation-prep transfer.
 
+⚠ **Missing-value semantics** (verified 2026-04-30 on the full 11.8K-app file-wrapper backfill): when `n_assignments_pre_t0 == 0`, `days_since_last_assignment` is `None` by construction in `_assignment_features` (`patent_aggregator.py`). This affects **1,132 / 10,834 patents (~10%)** that have a file wrapper. **Critical:** these are *not* dormant patents — their median `n_events_pre_t0` is 56 (max 188) with ~19 office actions on average. The missing assignment record is a **regime indicator**, not an activity proxy: it most often means an individual inventor or small entity that never recorded the inventor→applicant transfer with USPTO (recordation is optional). Treat it as informative — see §"Missingness semantics" below for the modeling treatment used in `features.transforms`.
+
 ### Post-T₀ assignments (banned)
 Assignments dated ≥ T₀ are dropped — patents losing IPRs are sometimes transferred shortly after, leaking the outcome.
 
@@ -197,7 +199,38 @@ Assignments dated ≥ T₀ are dropped — patents losing IPRs are sometimes tra
 
 ---
 
-## 8. Signal-prior summary
+## 8. Missingness semantics
+
+Two distinct "missing" regimes need to be preserved as features rather than collapsed by a blanket `fillna(0)`. Both are wired explicitly in `src/ml_uspto/features/transforms.py`.
+
+### Regime A — file wrapper not found
+~10% of trial-side application_numbers (1,213 / 11,844 in the 2026-04-30 backfill) come back as `not_found` from `/applications/search`. For those trials, *every* patent-side feature is `None` (no event bag, no assignment bag, no CPC). Likely causes: pre-publication apps, foreign-only filings, application numbers that have been re-issued, or USPTO indexing lag. Captured by:
+
+- **`patent_features_missing`** — single boolean indicator, 1 iff `n_events_pre_t0` is `None`.
+
+### Regime B — wrapper present, but no recorded assignment
+~10% of patents with a file wrapper (1,132 / 10,834) have an empty `assignmentBag` pre-T₀. As §5 notes, this is a **regime** (small-entity / individual-inventor / pro-se-style ownership) rather than a sign of dormancy — these patents have full prosecution histories. Captured by:
+
+- **`no_recorded_assignment`** — boolean, 1 iff `n_assignments_pre_t0 == 0`. Named for the *semantics*; numerically equivalent to `days_since_last_assignment_missing`.
+
+### Regime C — count features that are legitimately zero
+For pre-T₀ event counts (`n_events_pre_t0`, `n_office_actions`, `n_pe_pre_t0`, …), a `None` arising from regime A is treated identically to "0 events" because that's what an empty event bag would have produced. Filled with 0 *after* `patent_features_missing` is computed, so the regime indicator survives.
+
+### Regime D — nullable scalars where 0 ≠ None
+`prosecution_span_days`, `days_since_last_assignment`, and `days_grant_to_petition` carry semantic meaning when None (no events at all, no recorded assignment, no patent record respectively). Each gets:
+
+- **`<col>_missing`** — boolean indicator
+- **`<col>`** — median-imputed numeric value
+
+A tree model can route on the indicator; a linear model gets a non-collinear feature pair. The indicator is added *before* imputation so the original NaN signal isn't lost.
+
+### What this rules out
+
+The blanket `fillna(0)` we used pre-2026-04-30 silently collapsed all four regimes into one bucket — most damagingly, it conflated "0 days since last assignment" (just-recorded transfer, often litigation-prep) with "no assignment ever" (small entity), which point in *opposite* directions for IPR outcome priors.
+
+---
+
+## 9. Signal-prior summary
 
 Pre-modeling expectation, not empirical importance.
 
@@ -210,7 +243,7 @@ Pre-modeling expectation, not empirical importance.
 
 ---
 
-## 9. Fields we don't extract and why
+## 10. Fields we don't extract and why
 
 - `examinerNameText` — examiner-level effects are noisy and individually small; would need careful encoding to avoid overfitting.
 - `correspondenceAddressBag` — largely redundant with `customerNumber`.
@@ -219,7 +252,7 @@ Pre-modeling expectation, not empirical importance.
 
 ---
 
-## 10. Relationship to other docs
+## 11. Relationship to other docs
 
 - [`../api/patents.md`](../api/patents.md) — canonical JSON-path reference for `/applications/{appNum}` and the leakage-class table per field.
 - [`../api/api_feature_map.md`](../api/api_feature_map.md) — PTAB-side endpoints and features (the primary pipeline).

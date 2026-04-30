@@ -237,6 +237,17 @@ def _fetch_patent_batch(
             limit=len(application_numbers),
         )
     except requests.HTTPError as exc:
+        # 413 Request-Entity-Too-Large is empirically driven by *response*
+        # payload size for /applications/search — a few apps in any random
+        # batch have file wrappers large enough that a 80-app batch
+        # exceeds the API gateway's response cap. Recursive bisect isolates
+        # them; a single-app batch that still 413s is a genuine quarantine.
+        status = exc.response.status_code if exc.response is not None else None
+        if status == 413 and len(application_numbers) > 1:
+            mid = len(application_numbers) // 2
+            yield from _fetch_patent_batch(storage, client, application_numbers[:mid])
+            yield from _fetch_patent_batch(storage, client, application_numbers[mid:])
+            return
         for app in application_numbers:
             quarantine = _http_quarantine(app, exc, PatentQuarantineReason.HTTP_ERROR)
             _cache_quarantine(storage, quarantine)

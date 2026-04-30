@@ -22,32 +22,20 @@ Correctness check returned alongside the frame:
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime
+from datetime import date
 from typing import Any
 
 import pandas as pd
 
 from ml_uspto.clients.storage import Storage
 from ml_uspto.ingest.schemas.enums import Stage
+from ml_uspto.parse.dates import to_date
 from ml_uspto.parse.patent_aggregator import aggregate_patent
 from ml_uspto.parse.preprocessing import preprocess
 from ml_uspto.schemas.enums import Frame
 from ml_uspto.schemas.models import JoinReport, PatentFeatures
 
 logger = logging.getLogger(__name__)
-
-
-def _to_date(value: Any) -> date | None:
-    if value is None or (isinstance(value, float) and pd.isna(value)):
-        return None
-    if isinstance(value, datetime):
-        return value.date()
-    if isinstance(value, date):
-        return value
-    try:
-        return pd.Timestamp(value).date()
-    except (ValueError, TypeError):
-        return None
 
 
 def _patent_features_columns() -> list[str]:
@@ -149,7 +137,7 @@ def join_all(
          and run `aggregate_patent` with the proceedings-side T₀.
     """
     n_trials_input = len(trials)
-    labeled = preprocess(trials, decisions)
+    labeled = preprocess(trials, decisions, storage=storage)
     n_trials_labeled = len(labeled)
 
     petition_qn = _quarantined_trials(petition_quarantine)
@@ -175,8 +163,8 @@ def join_all(
     for row in joined.itertuples(index=False):
         app = str(row.application_number or "").strip()
         trial = str(row.trial_number)
-        t0 = _to_date(row.petition_filing_date)
-        grant = _to_date(row.grant_date)
+        t0 = to_date(row.petition_filing_date)
+        grant = to_date(row.grant_date)
 
         if not app or app in patent_qn or t0 is None:
             feature_rows.append({col: None for col in feature_columns})
@@ -212,17 +200,4 @@ def join_all(
     return out, report
 
 
-def load_and_join(storage: Storage) -> tuple[pd.DataFrame, JoinReport]:
-    """Driver convenience — load every stage 1–3 frame via `storage` and
-    call `join_all`. Used by `drivers/run_join.py`."""
-    return join_all(
-        storage,
-        trials=storage.load_frame(Frame.TRIALS),
-        decisions=storage.load_frame(Frame.DECISIONS),
-        petitions=storage.load_frame(Frame.PETITIONS),
-        petition_quarantine=storage.load_frame(Frame.PETITION_QUARANTINE),
-        patent_quarantine=storage.load_frame(Frame.PATENT_QUARANTINE),
-    )
-
-
-__all__ = ["join_all", "load_and_join"]
+__all__ = ["join_all"]

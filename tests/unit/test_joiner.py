@@ -53,6 +53,10 @@ def _trials_frame() -> pd.DataFrame:
 
 
 def _decisions_frame() -> pd.DataFrame:
+    # `document_title` carries the granular outcome empirically; the
+    # bare API field `trial_outcome` is always "Final Written Decision"
+    # (see config/labels.yaml). The title-regex layer in
+    # parse.preprocessing picks this up.
     return pd.DataFrame(
         [
             {
@@ -60,7 +64,12 @@ def _decisions_frame() -> pd.DataFrame:
                 "decision_type": "Decision",
                 "document_type": "Final Written Decision:  original",
                 "decision_issue_date": date(2023, 5, 23),
-                "trial_outcome": "All Challenged Claims Unpatentable",
+                "trial_outcome": "Final Written Decision",
+                "document_title": (
+                    "Final Written Decision Determining All Challenged Claims "
+                    "Unpatentable 35 U.S.C. § 318(a)"
+                ),
+                "document_identifier": "999999999",
             }
         ]
     )

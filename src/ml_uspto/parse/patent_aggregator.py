@@ -12,8 +12,7 @@ from collections.abc import Mapping
 from datetime import date, datetime
 from typing import Any
 
-import pandas as pd
-
+from ml_uspto.parse.dates import to_date
 from ml_uspto.parse.schemas.constants import (
     BANNED_EVENT_CATEGORIES,
     BANNED_EVENT_PREFIXES,
@@ -30,21 +29,8 @@ def _wrapper_record(payload: Mapping[str, Any]) -> Mapping[str, Any]:
     return payload
 
 
-def _to_date(value: Any) -> date | None:
-    if value is None or (isinstance(value, float) and pd.isna(value)):
-        return None
-    if isinstance(value, datetime):
-        return value.date()
-    if isinstance(value, date):
-        return value
-    try:
-        return pd.Timestamp(value).date()
-    except (ValueError, TypeError):
-        return None
-
-
 def _dated_before_t0(row: Mapping[str, Any], field: str, t0: date) -> date | None:
-    row_date = _to_date(row.get(field))
+    row_date = to_date(row.get(field))
     if row_date is None or row_date >= t0:
         return None
     return row_date
@@ -157,7 +143,7 @@ def aggregate_patent(
     `days_grant_to_petition` is intentionally left for the stage-4 join because
     it depends on the proceedings-side grant date, not the file-wrapper record.
     """
-    t0 = _to_date(petition_filing_date)
+    t0 = to_date(petition_filing_date)
     if t0 is None:
         raise ValueError("petition_filing_date must be parseable")
 
