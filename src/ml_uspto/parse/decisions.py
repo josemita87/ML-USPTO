@@ -38,7 +38,7 @@ from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
-from ml_uspto.clients.storage import Storage
+from ml_uspto.protocols.storage import Storage
 from ml_uspto.ingest.schemas.enums import Stage
 from ml_uspto.parse.schemas.enums import FwdPdfCandidateColumn as Col
 from ml_uspto.schemas.constants import (

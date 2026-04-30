@@ -10,7 +10,7 @@ driver: page-by-page cache under `data/raw/decisions/`.
 import argparse
 import logging
 
-from ml_uspto.clients.local import LocalStorage
+from ml_uspto.clients.storage.local import LocalStorage
 from ml_uspto.clients.uspto import USPTOClient
 from ml_uspto.ingest.fetch import fetch_decisions
 from ml_uspto.settings import get_settings

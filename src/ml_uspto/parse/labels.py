@@ -47,7 +47,7 @@ import logging
 
 import pandas as pd
 
-from ml_uspto.clients.storage import Storage
+from ml_uspto.protocols.storage import Storage
 from ml_uspto.ingest.schemas.enums import Stage
 from ml_uspto.parse.decisions import extract_outcome
 from ml_uspto.schemas.constants import (

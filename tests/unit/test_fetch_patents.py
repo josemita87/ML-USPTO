@@ -2,7 +2,7 @@ from pathlib import Path
 
 import requests
 
-from ml_uspto.clients.local import LocalStorage
+from ml_uspto.clients.storage.local import LocalStorage
 from ml_uspto.ingest.fetch import fetch_patents
 from ml_uspto.ingest.schemas.enums import Stage
 from ml_uspto.schemas.enums import PatentQuarantineReason

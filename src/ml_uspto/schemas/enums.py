@@ -62,7 +62,7 @@ class Frame(StrEnum):
     """Stable keys for the project's tabular outputs.
 
     Each member maps to one persisted DataFrame routed through
-    `clients.storage.Storage.{load,save}_frame`. The value is the storage
+    `storage.Storage.{load,save}_frame`. The value is the storage
     key (no extension; the backend chooses the format). Pipeline-stage
     object buckets live in `ingest.schemas.enums.Stage`, not here.
     """

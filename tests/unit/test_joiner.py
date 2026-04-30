@@ -4,7 +4,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from ml_uspto.clients.local import LocalStorage
+from ml_uspto.clients.storage.local import LocalStorage
 from ml_uspto.ingest.schemas.enums import Stage
 from ml_uspto.parse.joiner import join_all
 

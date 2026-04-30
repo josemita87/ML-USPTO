@@ -15,7 +15,7 @@ import logging
 
 import pandas as pd
 
-from ml_uspto.clients.local import LocalStorage
+from ml_uspto.clients.storage.local import LocalStorage
 from ml_uspto.clients.uspto import USPTOClient
 from ml_uspto.ingest.fetch import fetch_patents
 from ml_uspto.parse.flatten import flatten, load_parser_config

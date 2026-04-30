@@ -20,8 +20,8 @@ import logging
 
 import pandas as pd
 
-from ml_uspto.clients.local import LocalStorage
-from ml_uspto.clients.storage import Storage
+from ml_uspto.clients.storage.local import LocalStorage
+from ml_uspto.protocols.storage import Storage
 from ml_uspto.ingest.fetch import fetch_decision_pdfs
 from ml_uspto.clients.uspto import USPTOClient
 from ml_uspto.parse.decisions import enumerate_missing_fwd_pdfs

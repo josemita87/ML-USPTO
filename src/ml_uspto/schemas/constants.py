@@ -31,3 +31,8 @@ ALL_CLAIMS_UNPATENTABLE_OUTCOMES: frozenset[str] = frozenset(
 )
 
 FWD_PDF_COVER_PAGE_SEARCH_CHARS: int = int(_labels["fwd_pdf_outcome"]["cover_page_search_chars"])
+
+# boto3 ClientError codes that signal "key does not exist" across S3 ops.
+# Mechanical AWS-API mapping — not domain-revisable, so it's a Python
+# literal here rather than a YAML round-trip.
+S3_NOT_FOUND_CODES: frozenset[str] = frozenset({"NoSuchKey", "404", "NotFound"})

@@ -2,7 +2,7 @@
 
 Two entrypoints, one shared paginator. Pages and per-app payloads are
 cached object-by-object through the injected `Storage` backend
-(`clients.storage.Storage`), so a re-run after Ctrl-C resumes from the
+(`storage.Storage`), so a re-run after Ctrl-C resumes from the
 last cached object without re-issuing requests. `LocalStorage` puts
 them under `data/raw/<bucket>/<key>.json`; an S3 backend uses the same
 `(bucket, key)` shape against `s3://...`.
@@ -33,7 +33,7 @@ from typing import Any
 import pandas as pd
 import requests
 
-from ml_uspto.clients.storage import Storage
+from ml_uspto.protocols.storage import Storage
 from ml_uspto.clients.uspto import USPTOClient
 from ml_uspto.ingest.schemas.constants import PETITION_SCAN_CATEGORIES, STAGE_RECORDS_KEY
 from ml_uspto.ingest.schemas.enums import Stage

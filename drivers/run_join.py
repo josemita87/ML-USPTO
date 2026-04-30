@@ -8,7 +8,7 @@ post-processing. Run after stages 1–3 are populated.
 
 import logging
 
-from ml_uspto.clients.local import LocalStorage
+from ml_uspto.clients.storage.local import LocalStorage
 from ml_uspto.parse.joiner import join_all
 from ml_uspto.schemas.enums import Frame
 

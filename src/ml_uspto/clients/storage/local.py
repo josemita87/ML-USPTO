@@ -1,6 +1,6 @@
 """Local filesystem storage backend.
 
-Implements `clients.storage.Storage` against the local FS, with two roots:
+Implements `storage.Storage` against the local FS, with two roots:
 
   - `processed_root` for `Frame` parquets — `<root>/<frame>.parquet`
   - `raw_root` for object buckets — `<root>/<bucket>/<key>.json`

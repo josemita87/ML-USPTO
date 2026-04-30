@@ -10,8 +10,8 @@
     cache keyed by `(bucket, key)`. Buckets are pipeline `Stage` values;
     keys are opaque (page numbers, application numbers, …).
 
-Concrete implementations live next to their backend (`clients/local.py`,
-future `clients/s3.py`). Callers depend on the Protocol, not on a class.
+Concrete implementations live under `clients/` (`clients/local.py`,
+`clients/s3.py`). Callers depend on the Protocol, not on a class.
 """
 
 from __future__ import annotations

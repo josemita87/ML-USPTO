@@ -23,7 +23,7 @@ from typing import Any
 
 import pdfplumber
 
-from ml_uspto.clients.local import LocalStorage
+from ml_uspto.clients.storage.local import LocalStorage
 from ml_uspto.clients.uspto import USPTOClient
 from ml_uspto.ingest.schemas.enums import Stage
 
