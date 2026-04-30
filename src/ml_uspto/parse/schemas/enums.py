@@ -24,14 +24,17 @@ class ParserTransform(StrEnum):
     YN_BOOL = "yn_bool"
 
 
-class EventCategory(StrEnum):
-    """Patent file-wrapper event families loaded from `config/patents/event_codes.yaml`."""
+class FwdPdfCandidateColumn(StrEnum):
+    """Columns of the gap-detector output frame.
 
-    EX = "EX"
-    AA = "AA"
-    PE = "PE"
-    AD = "AD"
-    ISS = "ISS"
-    MAINT = "MAINT"
-    TRIAL = "TRIAL"
-    OTHER = "OTHER"
+    `parse.decisions.enumerate_missing_fwd_pdfs` produces this frame;
+    the fetch driver consumes it. Iterating the enum yields the canonical
+    column order — pass `[c.value for c in FwdPdfCandidateColumn]` to the
+    `pd.DataFrame` constructor when materializing.
+    """
+
+    TRIAL_NUMBER = "trial_number"
+    DOCUMENT_IDENTIFIER = "document_identifier"
+    FILE_DOWNLOAD_URI = "file_download_uri"
+    DOCUMENT_TITLE = "document_title"
+    DECISION_ISSUE_DATE = "decision_issue_date"

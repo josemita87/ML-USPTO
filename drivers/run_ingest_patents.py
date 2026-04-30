@@ -18,7 +18,7 @@ import pandas as pd
 from ml_uspto.clients.local import LocalStorage
 from ml_uspto.clients.uspto import USPTOClient
 from ml_uspto.ingest.fetch import fetch_patents
-from ml_uspto.parse.engine import flatten, load_parser_config
+from ml_uspto.parse.flatten import flatten, load_parser_config
 from ml_uspto.parse.schemas.enums import Parser
 from ml_uspto.schemas.enums import Frame
 from ml_uspto.schemas.models import PatentQuarantineEntry

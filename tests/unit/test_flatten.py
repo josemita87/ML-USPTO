@@ -1,6 +1,6 @@
-"""Smoke test for the declarative parser engine."""
+"""Smoke test for the declarative flatten engine."""
 
-from ml_uspto.parse.engine import flatten, flatten_records, load_parser_config
+from ml_uspto.parse.flatten import flatten, flatten_records, load_parser_config
 from ml_uspto.parse.schemas.enums import Parser
 
 

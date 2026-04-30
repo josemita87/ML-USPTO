@@ -8,7 +8,7 @@ from datetime import date
 
 import pandas as pd
 
-from ml_uspto.parse.petition_assembler import assemble_petitions
+from ml_uspto.parse.petitions import assemble_petitions
 from ml_uspto.schemas.enums import QuarantineReason
 
 
@@ -106,7 +106,7 @@ def test_t0_mismatch_logs_warning_but_proceedings_wins(caplog):
         ),
     ]
     trials = _trials_df([("IPR2024-00005", "2024-01-15")])
-    with caplog.at_level(logging.WARNING, logger="ml_uspto.parse.petition_assembler"):
+    with caplog.at_level(logging.WARNING, logger="ml_uspto.parse.petitions"):
         petitions, _ = assemble_petitions(raw, trials)
 
     assert len(petitions) == 1
@@ -119,7 +119,7 @@ def test_t0_match_does_not_warn(caplog):
         _doc_row("IPR2024-00006", 2, "Petition for Inter Partes Review", filing_date="2024-04-10"),
     ]
     trials = _trials_df([("IPR2024-00006", "2024-04-10")])
-    with caplog.at_level(logging.WARNING, logger="ml_uspto.parse.petition_assembler"):
+    with caplog.at_level(logging.WARNING, logger="ml_uspto.parse.petitions"):
         assemble_petitions(raw, trials)
     assert not any("T₀ mismatch" in m for m in caplog.messages)
 
@@ -187,7 +187,7 @@ def test_t0_cross_check_handles_pandas_timestamp_column():
 def test_trials_without_petition_filing_date_column_skips_t0_check(caplog):
     raw = [_doc_row("IPR2024-00009", 2, "Petition for Inter Partes Review")]
     trials = pd.DataFrame({"trial_number": ["IPR2024-00009"]})
-    with caplog.at_level(logging.WARNING, logger="ml_uspto.parse.petition_assembler"):
+    with caplog.at_level(logging.WARNING, logger="ml_uspto.parse.petitions"):
         petitions, _ = assemble_petitions(raw, trials)
     assert len(petitions) == 1
     assert not any("T₀" in m for m in caplog.messages)

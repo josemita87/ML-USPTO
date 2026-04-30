@@ -1,8 +1,8 @@
 """Stage 4 — join trials ⨝ petitions ⨝ patent features.
 
 Pure post-processing: reads the four stage 1–3 parquets plus the cached raw
-patent payloads, runs `parse.preprocessing.preprocess` to derive the
-`cancelled` label, runs `parse.patent_aggregator.aggregate_patent` per
+patent payloads, runs `parse.labels.build_labels` to derive the
+`cancelled` label, runs `features.patents.cleanse_at_t0` + `extract_features` per
 (trial, app) to build T₀-safe patent features, and emits one row per labeled
 non-quarantined trial.
 
@@ -29,9 +29,10 @@ import pandas as pd
 
 from ml_uspto.clients.storage import Storage
 from ml_uspto.ingest.schemas.enums import Stage
-from ml_uspto.parse.dates import to_date
-from ml_uspto.parse.patent_aggregator import aggregate_patent
-from ml_uspto.parse.preprocessing import preprocess
+from ml_uspto.features.patents import cleanse_at_t0, extract_features
+from ml_uspto.parse.labels import build_labels
+from ml_uspto.parse.patents import parse_patent_wrapper
+from ml_uspto.parse.utils import to_date
 from ml_uspto.schemas.enums import Frame
 from ml_uspto.schemas.models import JoinReport, PatentFeatures
 
@@ -72,12 +73,16 @@ def _aggregate_one(
         return None
 
     try:
-        features = aggregate_patent(
-            payload,
+        wrapper = parse_patent_wrapper(payload)
+        # Override with the proceedings-side number, which is the
+        # canonical key for the join even if the wrapper omits it.
+        wrapper.application_number = application_number
+        snapshot = cleanse_at_t0(
+            wrapper,
             trial_number=trial_number,
-            application_number=application_number,
             petition_filing_date=petition_t0,
         )
+        features = extract_features(snapshot)
     except (KeyError, ValueError, TypeError) as exc:
         logger.warning(
             "Aggregate failed for trial=%s app=%s: %s",
@@ -128,16 +133,17 @@ def join_all(
     out of this function makes it cheap to unit-test on synthetic frames.
 
     Steps:
-      1. `preprocess(trials, decisions)` → labeled trials with `cancelled`,
+      1. `build_labels(trials, decisions)` → labeled trials with `cancelled`,
          excluding pending and dropping rows missing `petition_filing_date`
          or `patent_number`.
       2. Inner-join with `petitions` on `trial_number`. Petition-quarantined
          trials are absent from `petitions` and so are dropped.
       3. For each surviving (trial, app), look up the cached patent payload
-         and run `aggregate_patent` with the proceedings-side T₀.
+         and run `parse_patent_wrapper` → `cleanse_at_t0` →
+         `extract_features` with the proceedings-side T₀.
     """
     n_trials_input = len(trials)
-    labeled = preprocess(trials, decisions, storage=storage)
+    labeled = build_labels(trials, decisions, storage=storage)
     n_trials_labeled = len(labeled)
 
     petition_qn = _quarantined_trials(petition_quarantine)

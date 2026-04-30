@@ -1,7 +1,7 @@
 # Declarative mappings for USPTO PTAB API surfaces.
 # Top-level keys correspond to `ml_uspto.parse.schemas.enums.Parser`.
 # Inside each surface, `columns` maps an output column name to a dotted
-# path into the raw record. Consumed by `ml_uspto.parse.engine.flatten`.
+# path into the raw record. Consumed by `ml_uspto.parse.flatten.flatten`.
 
 proceedings:
   columns:
@@ -45,7 +45,7 @@ decisions:
     document_filing_date: documentData.documentFilingDate
     filing_party: documentData.filingPartyCategory
     # documentIdentifier doubles as the PDF cache key under
-    # data/raw/decision_pdfs/<id>.pdf — needed by parse.preprocessing's
+    # data/raw/decision_pdfs/<id>.pdf — needed by parse.labels'
     # PDF-fallback label resolver for FWDs whose document_title doesn't
     # encode the granular outcome.
     document_identifier: documentData.documentIdentifier

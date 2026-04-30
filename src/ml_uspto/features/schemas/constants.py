@@ -1,11 +1,22 @@
-"""Subpackage-local constants for `ml_uspto.features.transforms`.
+"""Subpackage-local constants for `ml_uspto.features`.
 
-These are mechanical column lists (which patent-aggregator columns to
-consume, and which carry semantic NaN) — not a domain-revisable
-taxonomy, but per CLAUDE.md they still belong in a single import site
-rather than at the use site in `transforms.py`. Adjust here if the
-feature set changes.
+Two groups:
+  - Mechanical column lists for `transforms.build_features` —
+    `PATENT_COUNT_FEATURES` (NaN ⇒ no wrapper, fill 0) and
+    `PATENT_NULLABLE_NUMERIC` (NaN carries meaning, paired indicator).
+  - Patent event-code taxonomy for `features.patents` —
+    `EVENT_CODE_CATEGORIES`, `BANNED_EVENT_CATEGORIES`,
+    `BANNED_EVENT_PREFIXES`, loaded from
+    `config/patents/event_codes.yaml`. The taxonomy is domain-revisable
+    (a non-engineer might want to retag a code) so it lives in YAML.
 """
+
+from functools import lru_cache
+
+import yaml
+
+from ml_uspto import paths
+from ml_uspto.features.schemas.enums import EventCategory
 
 # Pre-T₀ count features — NaN ⇒ no file wrapper; safe to fill with 0
 # (0 events is what an empty bag would have produced upstream).
@@ -40,4 +51,27 @@ PATENT_NULLABLE_NUMERIC: tuple[str, ...] = (
 )
 
 
-__all__ = ["PATENT_COUNT_FEATURES", "PATENT_NULLABLE_NUMERIC"]
+@lru_cache(maxsize=1)
+def _load_patent_event_codes() -> dict:
+    with open(paths.PATENT_EVENT_CODES_YAML) as f:
+        return yaml.safe_load(f)
+
+
+_event_cfg = _load_patent_event_codes()
+
+EVENT_CODE_CATEGORIES: dict[str, EventCategory] = {
+    code: EventCategory(category) for code, category in _event_cfg["codes"].items()
+}
+BANNED_EVENT_CATEGORIES: frozenset[EventCategory] = frozenset(
+    EventCategory(category) for category in _event_cfg["banned_categories"]
+)
+BANNED_EVENT_PREFIXES: tuple[str, ...] = tuple(_event_cfg.get("banned_prefixes", []))
+
+
+__all__ = [
+    "PATENT_COUNT_FEATURES",
+    "PATENT_NULLABLE_NUMERIC",
+    "EVENT_CODE_CATEGORIES",
+    "BANNED_EVENT_CATEGORIES",
+    "BANNED_EVENT_PREFIXES",
+]

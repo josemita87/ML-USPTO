@@ -8,7 +8,7 @@ Each fixture is a real title observed in `data.uspto.gov` during the
   - exhibit cover sheets that mention "petition" (must not be picked).
 """
 
-from ml_uspto.parse.petition_picker import pick_petition
+from ml_uspto.parse.petitions import pick_petition
 
 
 def doc(number, title, category="Paper"):

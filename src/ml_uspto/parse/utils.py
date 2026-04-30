@@ -1,8 +1,8 @@
-"""Date coercion utilities for the parse subpackage.
+"""Shared utilities for the parse subpackage.
 
-Centralizes the heterogeneous-input → `date | None` coercion used when
-reading raw API payloads, where a field can arrive as a string, a
-pandas timestamp, a Python `date`/`datetime`, or NaN / None.
+Cross-module helpers that don't fit any single parse module — date
+coercion today, more as the subpackage grows. Things scoped to one
+module belong in that module, not here.
 """
 
 from __future__ import annotations

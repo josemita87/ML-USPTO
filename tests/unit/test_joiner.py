@@ -56,7 +56,7 @@ def _decisions_frame() -> pd.DataFrame:
     # `document_title` carries the granular outcome empirically; the
     # bare API field `trial_outcome` is always "Final Written Decision"
     # (see config/labels.yaml). The title-regex layer in
-    # parse.preprocessing picks this up.
+    # parse.labels picks this up.
     return pd.DataFrame(
         [
             {

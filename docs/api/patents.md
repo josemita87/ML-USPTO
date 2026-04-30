@@ -109,7 +109,7 @@ The full event-code dictionary is large (the probed patent alone has 47 distinct
 
 1. **From the proceedings frame**, build the unique set `apps = {row.applicationNumberText for row in proceedings}` (~10–13K applications across ~18K IPRs after joinder dedup).
 2. **For each uncached batch of applications**, `POST /applications/search` filtered by `applicationNumberText`. Cache each returned wrapper under `data/raw/patents/{app}.json`. Rate-limit bucket: same `/api/v1/patent/*` family as proceedings.
-3. **Flatten via `parse.engine.flatten(records, "patents")`** with a new `config/parsers/patents.yaml` mapping the static paths from the table above. The parser config does *not* try to flatten the dated bags directly — those go through a dedicated aggregator step.
+3. **Flatten via `parse.flatten.flatten(records, "patents")`** with a new `config/parsers/patents.yaml` mapping the static paths from the table above. The parser config does *not* try to flatten the dated bags directly — those go through a dedicated aggregator step.
 4. **Aggregate the dated bags** in a second pass, parameterized by `petitionFilingDate` (joined in from proceedings on `applicationNumberText`). Output one `PatentFeatures` row per `(trialNumber, applicationNumberText)`. T₀-filter is applied here, once, in code that lives next to the parser.
 5. **Schema**: one `Patent` model in `schemas/models.py` for the raw flatten + a `PatentFeatures` model for the aggregations. Two layers because the raw flatten still has variable-length bags; the feature row is one fixed shape.
 

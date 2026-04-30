@@ -29,7 +29,7 @@ def main() -> None:
     storage.save_frame(df, Frame.JOINED_TRIALS)
     print(f"joined: {len(df)} rows -> frame {Frame.JOINED_TRIALS.value}")
     print(f"  trials in:                   {report.n_trials_input}")
-    print(f"  labeled (post-preprocess):   {report.n_trials_labeled}")
+    print(f"  labeled (post-build_labels): {report.n_trials_labeled}")
     print(f"  petition quarantine:         {report.n_petition_quarantine}")
     print(f"  patent quarantine:           {report.n_patent_quarantine}")
     print(f"  with patent features:        {report.n_with_patent_features}")

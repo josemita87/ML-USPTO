@@ -1,15 +1,53 @@
-"""Assemble per-trial petition rows from corpus-wide documents/search output.
+"""Identify the petition document for each trial and assemble per-trial rows.
 
-Stage 2 fetches ~301K raw document rows in one paginated scan filtered to
-`documentCategory IN ["PETITION", "Paper"]`. This module groups those raw
-rows by `trialNumber` and runs `pick_petition` per group to pick the one
-original-petition row per trial. A single picker pass handles both the
-post-2022 PETITION bucket (which can still contain Corrected/Joinder
-duplicates) and the pre-2022 Paper catch-all — see
-`docs/api/proceedings.md` "Petition coverage and the category-taxonomy
-drift".
+Two public functions, one domain — both deal with picking the petition
+filing out of a trial's documents/search rows:
 
-Per-group outcomes:
+  - `pick_petition(rows)` — runs the layered filter (exhibit drop, paper-
+    number ceiling, title regex, blacklist, lowest-paper tiebreaker) on
+    one trial's rows and returns the picked row or `None`. Pure function.
+
+  - `assemble_petitions(records, trials)` — groups corpus-wide
+    documents/search records by `trialNumber`, runs the picker per
+    group, and returns `(petitions, quarantine)`. Quarantine is explicit:
+    `picker_no_match` for groups where every candidate failed the filter,
+    `no_documents` for trials present in `trials` but absent from the
+    documents corpus.
+
+The PTAB documents endpoint returns one row per filing (`POST
+/trials/documents/search` filtered by `trialNumber`). The petition is the
+single row we actually care about for feature extraction, but its
+identity must be inferred — `documentCategory` is unreliable across the
+taxonomy drift (post-2022 trials use `PETITION`; pre-2022 trials lump
+petitions into the legacy `Paper` catch-all alongside motions, orders,
+and mandatory notices). See `docs/api/proceedings.md` "Petition coverage
+and the category-taxonomy drift" for the mechanic.
+
+Picker layers (applied in order to each row):
+
+1. Drop exhibits (`documentCategory` ∈ EXHIBIT_CATEGORIES).
+2. Drop high paper numbers (`documentNumber >= PAPER_NUMBER_CEILING`) —
+   empirically 94% of real petitions sit at paper 1–3 and none observed
+   past paper 8 across 239 stratified trials.
+3. Title must match PETITION_TITLE — covers "Petition for…", "Inter
+   Partes Review of [patent]", "Request for IPR…", and the
+   "Petitioner's Petition for…" phrasing.
+4. Title must NOT match BLACKLIST — strips out near-misses like "Power of
+   Attorney", "Notice of Filing Date Accorded to Petition",
+   "Petitioner's Reply", "Sur-Reply", joinder motions, etc.
+5. Among survivors, take the lowest `documentNumber` — picks the
+   *original* petition over any "Corrected Petition" filed later.
+
+Empirical validation (probe of 239 trials stratified across 2012–2025 +
+all terminal statuses): 98.7% clean recall, 0 false positives. The 1.3%
+miss rate falls through to a quarantine list rather than feeding wrong
+PDFs into the feature pipeline — this is the right failure mode for a
+leakage-sensitive system.
+
+Picker constants live in `config/petition_picker.yaml` and are exposed
+via `ml_uspto.parse.schemas.constants`.
+
+Per-group outcomes from `assemble_petitions`:
 
   - picker hits → `Petition` row built from `picked["documentData"]`
     only, NEVER `picked["trialMetaData"]`. The trialMetaData on a
@@ -38,13 +76,43 @@ from typing import Any
 
 import pandas as pd
 
-from ml_uspto.parse.dates import to_date
-from ml_uspto.parse.petition_picker import pick_petition
-from ml_uspto.parse.schemas.constants import QUARANTINE_SAMPLE_TITLES_LIMIT
+from ml_uspto.parse.utils import to_date
+from ml_uspto.parse.schemas.constants import (
+    EXHIBIT_CATEGORIES,
+    PAPER_NUMBER_CEILING,
+    QUARANTINE_SAMPLE_TITLES_LIMIT,
+)
+from ml_uspto.parse.schemas.patterns import BLACKLIST, PETITION_TITLE
 from ml_uspto.schemas.enums import QuarantineReason
 from ml_uspto.schemas.models import Petition, QuarantineEntry
 
 logger = logging.getLogger(__name__)
+
+
+def pick_petition(rows: Iterable[Mapping[str, Any]]) -> dict | None:
+    """Return the petition row from a trial's full document list, or None."""
+    candidates: list[tuple[int, dict]] = []
+    for row in rows:
+        dd = row.get("documentData") or {}
+        title = dd.get("documentTitleText") or dd.get("documentName") or ""
+        category = dd.get("documentCategory") or ""
+        number = dd.get("documentNumber") or 9999
+
+        if category in EXHIBIT_CATEGORIES:
+            continue
+        if number >= PAPER_NUMBER_CEILING:
+            continue
+        if not PETITION_TITLE.search(title):
+            continue
+        if BLACKLIST.search(title):
+            continue
+
+        candidates.append((number, dict(row)))
+
+    if not candidates:
+        return None
+    candidates.sort(key=lambda x: x[0])
+    return candidates[0][1]
 
 
 def _group_by_trial(records: Iterable[Mapping[str, Any]]) -> dict[str, list[dict]]:
@@ -141,4 +209,4 @@ def assemble_petitions(
     return petitions, quarantine
 
 
-__all__ = ["assemble_petitions"]
+__all__ = ["pick_petition", "assemble_petitions"]

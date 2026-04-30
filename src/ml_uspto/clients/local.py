@@ -105,5 +105,12 @@ class LocalStorage:
             return None
         return path.read_bytes()
 
+    def iter_blob_keys(self, bucket: str, ext: str) -> Iterator[str]:
+        base = self.raw_root / bucket
+        if not base.exists():
+            return
+        for path in base.glob(f"*.{ext}"):
+            yield path.stem
+
 
 __all__ = ["LocalStorage"]

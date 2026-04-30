@@ -59,7 +59,7 @@ The verdict-level field (`trialOutcomeCategory == "All Challenged Claims Unpaten
 
 - `pending_statuses` widened to `[Pending, Pending Director Review, Trial Instituted]` (was `[Trial Instituted]` only).
 - `non_fwd_label_0_statuses` extended with `Terminated-Dismissed`.
-- New top-level key `non_fwd_label_1_statuses: [Terminated-Adverse Judgment]`. `parse/preprocessing.py` now resolves the label by checking, in order: label-1-by-status, label-0-by-status, FWD verdict from the decisions side. Marked subject to domain-expert review in case the project's "what counts as cancelled?" definition diverges from the legal default.
+- New top-level key `non_fwd_label_1_statuses: [Terminated-Adverse Judgment]`. `parse/labels.py` now resolves the label by checking, in order: label-1-by-status, label-0-by-status, FWD verdict from the decisions side. Marked subject to domain-expert review in case the project's "what counts as cancelled?" definition diverges from the legal default.
 
 ## What this means for ingestion
 
@@ -71,7 +71,7 @@ The verdict-level field (`trialOutcomeCategory == "All Challenged Claims Unpaten
 
 ## Field-by-field paths
 
-For the proceedings schema used by `ml_uspto.parse.preprocessing`:
+For the proceedings schema used by `ml_uspto.parse.labels`:
 
 | Column | Path on proceedings row | Path on documents/search petition row | Leakage class |
 |---|---|---|---|

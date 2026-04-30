@@ -2,16 +2,16 @@
 
 Separated from `schemas.constants` so the regex spec, its compile flags, and
 its match contract live in one place. Constants that aren't regex stay in
-`schemas.constants`.
+`schemas.constants`; the `FwdOutcomePattern` type lives in `schemas.models`.
 """
 
 import re
 from functools import lru_cache
-from typing import NamedTuple
 
 import yaml
 
 from ml_uspto import paths
+from ml_uspto.schemas.models import FwdOutcomePattern
 
 
 @lru_cache(maxsize=1)
@@ -21,12 +21,6 @@ def _load() -> dict:
 
 
 _fwd_pdf = _load()["fwd_pdf_outcome"]
-
-
-class FwdOutcomePattern(NamedTuple):
-    name: str
-    pattern: re.Pattern[str]
-    label: int
 
 
 FWD_PDF_OUTCOME_PATTERNS: tuple[FwdOutcomePattern, ...] = tuple(
@@ -39,4 +33,4 @@ FWD_PDF_OUTCOME_PATTERNS: tuple[FwdOutcomePattern, ...] = tuple(
 )
 
 
-__all__ = ["FwdOutcomePattern", "FWD_PDF_OUTCOME_PATTERNS"]
+__all__ = ["FWD_PDF_OUTCOME_PATTERNS"]

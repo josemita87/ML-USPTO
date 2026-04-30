@@ -5,12 +5,17 @@ populate either from raw JSON (`Proceeding.model_validate(payload)`) or from
 snake_case kwargs (`Proceeding(trial_number=...)`).
 """
 
+import re
 from datetime import date, datetime
-from typing import Any
+from typing import Any, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from ml_uspto.schemas.enums import PatentQuarantineReason, QuarantineReason
+from ml_uspto.schemas.enums import (
+    DecisionPdfFailureReason,
+    PatentQuarantineReason,
+    QuarantineReason,
+)
 
 # ---------------------------------------------------------------------------
 # /trials/proceedings
@@ -179,7 +184,7 @@ class AdmissibilityPartition(BaseModel):
 
 
 class Petition(BaseModel):
-    """One trial's picked petition row, produced by `parse.petition_assembler`.
+    """One trial's picked petition row, produced by `parse.petitions`.
 
     Built from `documentData.*` paths only. The `trialMetaData` block on a
     document row is the live trial header lagged by the documents-endpoint
@@ -229,42 +234,136 @@ class PatentFetchResult(BaseModel):
     quarantine: PatentQuarantineEntry | None = None
 
 
-class Patent(BaseModel):
-    """Static-only flatten of `/applications/{appNum}`.
-
-    Dated bags (`eventDataBag`, `assignmentBag`, `parentContinuityBag`) are
-    intentionally NOT here — they're routed through `parse.patent_aggregator`
-    which T₀-filters them. Letting them reach the engine would risk leaking
-    post-petition events into features.
+class DecisionPdfFailure(BaseModel):
+    """One failed FWD-PDF download. Persisted as a row in
+    `Frame.DECISION_PDF_FAILURES`; the gap-detector skips doc_ids whose
+    latest failure is within `--retry-after-days` so transient 5xxs don't
+    permanently quarantine but a doc isn't retried every cron either.
     """
 
     model_config = ConfigDict(extra="ignore")
 
+    trial_number: str
+    document_identifier: str
+    file_download_uri: str
+    reason: DecisionPdfFailureReason
+    http_status: int | None = None
+    error: str | None = None
+    failed_at: datetime
+
+
+class DecisionPdfFetchResult(BaseModel):
+    """One PDF download outcome emitted by `ingest.fetch.fetch_decision_pdfs`.
+
+    On success, `bytes_written` is the size saved under
+    `Stage.DECISION_PDFS / <doc_id>.pdf`; on failure, `failure` carries the
+    diagnostic row to append to `Frame.DECISION_PDF_FAILURES`. Mutually
+    exclusive — exactly one of the two is populated.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    document_identifier: str
+    bytes_written: int | None = None
+    failure: DecisionPdfFailure | None = None
+
+
+class PatentEvent(BaseModel):
+    """One entry from `eventDataBag` of a patent file wrapper."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    event_date: date | None = Field(default=None, alias="eventDate")
+    event_code: str | None = Field(default=None, alias="eventCode")
+
+
+class Assignee(BaseModel):
+    """One assignee inside an `assignmentBag` entry's `assigneeBag`."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    assignee_name: str | None = Field(default=None, alias="assigneeNameText")
+
+
+class PatentAssignment(BaseModel):
+    """One entry from `assignmentBag` of a patent file wrapper."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    assignment_received_date: date | None = Field(default=None, alias="assignmentReceivedDate")
+    assignment_recorded_date: date | None = Field(default=None, alias="assignmentRecordedDate")
+    assignees: list[Assignee] = Field(default_factory=list, alias="assigneeBag")
+
+
+class ParentApplication(BaseModel):
+    """One entry from `parentContinuityBag` — currently only a count is consumed."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    application_number: str | None = Field(default=None, alias="parentApplicationNumberText")
+
+
+class PatentFileWrapper(BaseModel):
+    """**Contract 1** — typed view of a raw `/applications/{appNum}` payload.
+
+    T₀-naïve, no trial context. Construct via
+    `parse.patents.parse_patent_wrapper`, which unwraps the
+    `patentFileWrapperDataBag` envelope and normalizes the
+    inconsistently-typed `cpcClassificationBag` entries to a flat
+    `list[str]` before validation. Consumed by
+    `features.patents.cleanse_at_t0` to build `PatentSnapshot`.
+    """
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    application_number: str | None = Field(default=None, alias="applicationNumberText")
+    cpc_classifications: list[str] = Field(default_factory=list)
+    events: list[PatentEvent] = Field(default_factory=list, alias="eventDataBag")
+    assignments: list[PatentAssignment] = Field(default_factory=list, alias="assignmentBag")
+    parent_continuity: list[ParentApplication] = Field(
+        default_factory=list, alias="parentContinuityBag"
+    )
+
+
+class PatentSnapshot(BaseModel):
+    """**Contract 2** — T₀-cleansed per-(trial, application) view of a patent.
+
+    Produced by `features.patents.cleanse_at_t0(wrapper, trial_number,
+    petition_filing_date, ...)`. Carries the same nested bag types as
+    `PatentFileWrapper` but with leakage already removed:
+
+      - `events`: drops rows with `event_date >= T₀` AND drops banned
+        categories (`TRIAL*` event codes — the label leaking through).
+      - `assignments`: drops rows whose received/recorded date is `>= T₀`
+        (or has no usable date).
+      - `cpc_classifications`, `parent_continuity`: undated, passed through.
+
+    Downstream feature extractors (count features, future text or
+    embedding features) consume the snapshot and never re-implement
+    leakage discipline. The `petition_filing_date` field is kept on the
+    snapshot so consumers like `extract_features` can compute
+    `days_since_last_assignment` without re-passing T₀.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    trial_number: str
     application_number: str
-    filing_date: date | None = None
-    effective_filing_date: date | None = None
-    application_type: str | None = None
-    entity_size: str | None = None
-    first_inventor_to_file: bool | None = None
-    national_stage: bool | None = None
-    n_inventors: int | None = None
-    inventor_country_codes: list[str] = Field(default_factory=list)
-    cpc_codes: list[str] = Field(default_factory=list)
-    uspc_class_subclass: str | None = None
-    n_attorneys_of_record: int | None = None
-    pta_a_delay: int | None = None
-    pta_b_delay: int | None = None
-    pta_c_delay: int | None = None
-    pta_total: int | None = None
-    pta_applicant_delay: int | None = None
+    petition_filing_date: date
+
+    cpc_classifications: list[str] = Field(default_factory=list)
+    events: list[PatentEvent] = Field(default_factory=list)
+    assignments: list[PatentAssignment] = Field(default_factory=list)
+    parent_continuity: list[ParentApplication] = Field(default_factory=list)
 
 
 class PatentFeatures(BaseModel):
-    """T₀-aggregated features per (trial, application).
+    """Numerical features per (trial, application), derived from a
+    `PatentSnapshot`.
 
-    Produced by `parse.patent_aggregator` — the canonical T₀-filter site.
-    Drops `eventDate >= T₀`, all `TRIAL*` event codes (those carry the label),
-    post-T₀ assignments, and `parentApplicationStatusCode` (status-now leaks).
+    Produced by `features.patents.extract_features(snapshot)`. Pure
+    counting + span computation — no leakage logic, since the snapshot is
+    already cleansed.
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -410,3 +509,11 @@ class PetitionTextFeatures(BaseModel):
 
     text_doc_sha256: str
     extracted_at: datetime
+
+
+class FwdOutcomePattern(NamedTuple):
+    """One FWD-PDF cover-page regex bound to its outcome label."""
+
+    name: str
+    pattern: re.Pattern[str]
+    label: int

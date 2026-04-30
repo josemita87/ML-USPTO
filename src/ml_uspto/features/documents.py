@@ -1,15 +1,27 @@
-"""T0 leakage filter for trial documents.
+"""Document-side feature engineering for trial documents.
 
-A document is admissible iff its `documentFilingDate` is on or before the
-petition filing date (T0). This is the single rule from
-`docs/scope/prediction_scope.md` §4: papers bundled with the petition
-(Power of Attorney, mandatory notices, exhibits 1xxx) carry
-`documentFilingDate == T0` and pass; everything else (POPR, POR, Reply,
-Sur-Reply, orders, decisions, CAFC mandate, late exhibits) is filed
-strictly after T0 and is excluded.
+Mirrors `features.patents` for the document corpus: all document-derived
+feature logic lives here, starting with the T₀ admissibility gate and
+expanding to per-document text / OCR / embedding extractors as those
+land. Anything that turns trial documents into model-ready signals is
+this module's domain.
 
-Type-based filters are not needed — the date check is sufficient and
-correct by construction.
+Currently exposed:
+
+  - `is_admissible(record, t0)` / `partition_records(records, t0)` — pure
+    T₀ leakage filter. A document is admissible iff its
+    `documentFilingDate` is on or before T₀ (`petition_filing_date`).
+    Per `docs/scope/prediction_scope.md` §4: papers bundled with the
+    petition (Power of Attorney, mandatory notices, exhibits 1xxx) carry
+    `documentFilingDate == T0` and pass; everything else (POPR, POR,
+    Reply, Sur-Reply, orders, decisions, CAFC mandate, late exhibits) is
+    filed strictly after T₀ and is excluded. Type-based filters are not
+    needed — the date check is sufficient and correct by construction.
+
+  - `partition_trial_dir(...)` — operational helper that applies the
+    same gate to an on-disk trial directory and moves excluded PDFs into
+    `_excluded_post_T0/` so a downstream text extractor only sees the
+    admissible slice.
 """
 
 from __future__ import annotations

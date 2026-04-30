@@ -1,4 +1,4 @@
-"""Integration tests for `parse.fwd_outcome.extract_outcome` against real
+"""Integration tests for `parse.decisions.extract_outcome` against real
 FWD PDFs cached under `data/raw/decision_pdfs/`.
 
 These tests intentionally read PDFs from the live cache rather than
@@ -33,7 +33,7 @@ from pathlib import Path
 import pdfplumber
 import pytest
 
-from ml_uspto.parse.fwd_outcome import extract_outcome
+from ml_uspto.parse.decisions import extract_outcome
 from ml_uspto.schemas.constants import FWD_ORIGINAL_MARKER
 
 PDF_CACHE_DIR = Path("data/raw/decision_pdfs")
@@ -59,7 +59,7 @@ def _label_from_title(title: str) -> int | None:
 def _is_original(entry: dict) -> bool:
     """True iff this FWD is an original (not on-remand / rehearing).
 
-    Mirrors `parse.preprocessing._identify_terminating_fwd`'s filter — see
+    Mirrors `parse.labels._identify_terminating_fwd`'s filter — see
     `docs/scope/prediction_scope.md` §3.1 for why we only label originals.
     """
     dt = (entry.get("document_type") or "").lower()

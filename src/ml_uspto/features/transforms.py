@@ -2,7 +2,7 @@
 
 Every feature here must be observable at T₀ (`petition_filing_date`) per
 `docs/scope/prediction_scope.md` §4. T₀ enforcement happens upstream in
-`parse.patent_aggregator`; this module just consumes the aggregates.
+`features.patents.cleanse_at_t0`; this module just consumes the aggregates.
 
 Missingness handling — see `docs/features/patent_file_wrapper_features.md`
 §"Missingness semantics" for the full rationale on the four regimes

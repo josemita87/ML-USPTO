@@ -20,7 +20,7 @@ previous layer left unresolved:
   2. **`document_title` regex.** ~41% of original FWDs encode the
      granular ruling directly in the API-returned title text
      ("Determining All Challenged Claims Unpatentable …"). Apply
-     `parse.fwd_outcome.extract_outcome` to the title.
+     `parse.decisions.extract_outcome` to the title.
   3. **PDF cover-page fallback.** For trials still unresolved, load the
      cached FWD PDF (`Stage.DECISION_PDFS / <document_identifier>.pdf`),
      extract page 0 via pdfplumber, and run the same regex. Skipped
@@ -49,7 +49,7 @@ import pandas as pd
 
 from ml_uspto.clients.storage import Storage
 from ml_uspto.ingest.schemas.enums import Stage
-from ml_uspto.parse.fwd_outcome import extract_outcome
+from ml_uspto.parse.decisions import extract_outcome
 from ml_uspto.schemas.constants import (
     FWD_DECISION_TYPE_MARKER,
     FWD_ORIGINAL_MARKER,
@@ -117,7 +117,7 @@ def _identify_terminating_fwd(decisions: pd.DataFrame) -> pd.DataFrame:
     return terminating[out_cols]
 
 
-def preprocess(
+def build_labels(
     proceedings: pd.DataFrame,
     decisions: pd.DataFrame,
     storage: Storage | None = None,

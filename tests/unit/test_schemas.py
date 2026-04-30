@@ -10,7 +10,6 @@ from datetime import date, datetime
 from ml_uspto.schemas.enums import PatentQuarantineReason, QuarantineReason
 from ml_uspto.schemas.models import (
     JoinedTrial,
-    Patent,
     PatentFeatures,
     PatentFetchResult,
     PatentQuarantineEntry,
@@ -176,13 +175,6 @@ def test_petition_text_features_word_count_optional_others_zero():
     assert feats.n_claims_challenged == 0
     assert feats.has_sotera_stipulation is False
     assert feats.n_grounds_102 == 0
-
-
-def test_patent_default_cpc_codes_is_empty():
-    p = Patent(application_number="14709428")
-    assert p.cpc_codes == []
-    assert p.inventor_country_codes == []
-    assert p.first_inventor_to_file is None
 
 
 def test_patent_quarantine_and_fetch_result_shape():

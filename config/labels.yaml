@@ -1,8 +1,8 @@
-# Label-construction taxonomies for `ml_uspto.parse.preprocessing`.
+# Label-construction taxonomies for `ml_uspto.parse.labels`.
 # These encode the §3 rules of `docs/scope/prediction_scope.md` as data so the
 # code stays stable when USPTO terminology shifts.
 #
-# Three layers of label resolution, applied in order in `preprocessing.py`:
+# Three layers of label resolution, applied in order in `labels.py`:
 #   1. status ∈ non_fwd_label_1_statuses → label 1 (no decision lookup needed)
 #   2. status ∈ non_fwd_label_0_statuses → label 0 (no decision lookup needed)
 #   3. otherwise (FWD-reaching trials) → label depends on the decision-side

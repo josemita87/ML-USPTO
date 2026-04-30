@@ -48,6 +48,16 @@ class PatentQuarantineReason(StrEnum):
     EMPTY_RESPONSE = "empty_response"
 
 
+class DecisionPdfFailureReason(StrEnum):
+    """Why an FWD PDF download failed. Persisted in `Frame.DECISION_PDF_FAILURES`
+    rows so the gap-detector can quarantine retryably (see
+    `parse.decisions._recently_failed`)."""
+
+    HTTP_ERROR = "http_error"
+    REQUEST_ERROR = "request_error"
+    EMPTY_RESPONSE = "empty_response"
+
+
 class Frame(StrEnum):
     """Stable keys for the project's tabular outputs.
 
@@ -63,6 +73,7 @@ class Frame(StrEnum):
     PETITION_QUARANTINE = "petition_quarantine"
     PATENTS = "patents"
     PATENT_QUARANTINE = "patent_quarantine"
+    DECISION_PDF_FAILURES = "decision_pdf_failures"
     JOINED_TRIALS = "joined_trials"
 
 

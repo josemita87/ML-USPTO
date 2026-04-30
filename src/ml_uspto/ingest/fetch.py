@@ -25,7 +25,9 @@ them under `data/raw/<bucket>/<key>.json`; an S3 backend uses the same
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable, Iterable, Iterator
+from datetime import datetime, timezone
 from typing import Any
 
 import pandas as pd
@@ -35,10 +37,15 @@ from ml_uspto.clients.storage import Storage
 from ml_uspto.clients.uspto import USPTOClient
 from ml_uspto.ingest.schemas.constants import PETITION_SCAN_CATEGORIES, STAGE_RECORDS_KEY
 from ml_uspto.ingest.schemas.enums import Stage
-from ml_uspto.parse.engine import flatten
-from ml_uspto.parse.schemas.enums import Parser
-from ml_uspto.schemas.enums import Frame, PatentQuarantineReason
-from ml_uspto.schemas.models import PatentFetchResult, PatentQuarantineEntry
+from ml_uspto.parse.flatten import flatten
+from ml_uspto.parse.schemas.enums import FwdPdfCandidateColumn, Parser
+from ml_uspto.schemas.enums import DecisionPdfFailureReason, Frame, PatentQuarantineReason
+from ml_uspto.schemas.models import (
+    DecisionPdfFailure,
+    DecisionPdfFetchResult,
+    PatentFetchResult,
+    PatentQuarantineEntry,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +143,7 @@ def fetch_decisions(
     Filters via POST on `trialMetaData.trialTypeCode = "IPR"`. Same paginator
     + cache plumbing as `fetch_proceedings`; pages cached under bucket
     `Stage.DECISIONS`. Required to derive the `cancelled` label for trials
-    with `Final Written Decision` status — `parse.preprocessing` looks up the
+    with `Final Written Decision` status — `parse.labels` looks up the
     terminating FWD's `trialOutcomeCategory` per trial.
     """
     records = list(
@@ -172,7 +179,7 @@ def fetch_petitions(
     rationale. Records are cached page-by-page under
     `data/raw/documents_petition_scan/`. The iterator is single-pass
     (one page resident at a time); pass it directly to
-    `parse.petition_assembler.assemble_petitions` to avoid materializing
+    `parse.petitions.assemble_petitions` to avoid materializing
     all ~323K records.
     """
     return _paginate_cached(
@@ -356,4 +363,95 @@ def fetch_patents(
     logger.info("Fetched %d patent application outcomes", len(apps))
 
 
-__all__ = ["fetch_proceedings", "fetch_decisions", "fetch_petitions", "fetch_patents"]
+def fetch_decision_pdfs(
+    storage: Storage,
+    client: USPTOClient,
+    candidates: pd.DataFrame,
+    *,
+    rate_sleep: float = 2.0,
+) -> Iterator[DecisionPdfFetchResult]:
+    """Download each candidate FWD PDF, save under `Stage.DECISION_PDFS`,
+    yield one outcome per row.
+
+    `candidates` is the frame returned by
+    `parse.decisions.enumerate_missing_fwd_pdfs` — already filtered for
+    cache hits and recent failures, so every row is a fresh attempt.
+    Successful downloads land at `Stage.DECISION_PDFS / <doc_id>.pdf`;
+    failures yield a `DecisionPdfFailure` row for the caller to persist
+    into `Frame.DECISION_PDF_FAILURES`.
+
+    `rate_sleep` is a fixed inter-request pause to stay well under the
+    PDF-bucket budget (~1.2M requests/week — much tighter than metadata).
+    The 429 backoff inside `USPTOClient.download_pdf` handles bursts; this
+    sleep keeps the average rate down.
+    """
+    trial_col = FwdPdfCandidateColumn.TRIAL_NUMBER.value
+    doc_col = FwdPdfCandidateColumn.DOCUMENT_IDENTIFIER.value
+    uri_col = FwdPdfCandidateColumn.FILE_DOWNLOAD_URI.value
+
+    def _fail(
+        doc_id: str,
+        trial_number: str,
+        uri: str,
+        reason: DecisionPdfFailureReason,
+        *,
+        http_status: int | None = None,
+        error: str | None = None,
+    ) -> DecisionPdfFetchResult:
+        return DecisionPdfFetchResult(
+            document_identifier=doc_id,
+            failure=DecisionPdfFailure(
+                trial_number=trial_number,
+                document_identifier=doc_id,
+                file_download_uri=uri,
+                reason=reason,
+                http_status=http_status,
+                error=error,
+                failed_at=datetime.now(timezone.utc),
+            ),
+        )
+
+    for _, row in candidates.iterrows():
+        doc_id = str(row[doc_col])
+        uri = str(row[uri_col])
+        trial_number = str(row[trial_col])
+        try:
+            payload = client.download_pdf(uri)
+        except requests.HTTPError as exc:
+            # Errors are already slow + the 429 backoff inside
+            # download_pdf already paced this attempt — don't sleep again.
+            response = exc.response
+            yield _fail(
+                doc_id, trial_number, uri,
+                DecisionPdfFailureReason.HTTP_ERROR,
+                http_status=response.status_code if response is not None else None,
+                error=str(exc)[:500],
+            )
+            continue
+        except (requests.RequestException, RuntimeError) as exc:
+            yield _fail(
+                doc_id, trial_number, uri,
+                DecisionPdfFailureReason.REQUEST_ERROR,
+                error=str(exc)[:500],
+            )
+            continue
+
+        if not payload:
+            yield _fail(
+                doc_id, trial_number, uri,
+                DecisionPdfFailureReason.EMPTY_RESPONSE,
+            )
+            continue
+
+        storage.save_blob(Stage.DECISION_PDFS.value, doc_id, "pdf", payload)
+        yield DecisionPdfFetchResult(document_identifier=doc_id, bytes_written=len(payload))
+        time.sleep(rate_sleep)
+
+
+__all__ = [
+    "fetch_proceedings",
+    "fetch_decisions",
+    "fetch_petitions",
+    "fetch_patents",
+    "fetch_decision_pdfs",
+]
