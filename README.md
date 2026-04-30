@@ -1,8 +1,8 @@
 # ML-USPTO
 
-Predicting **IPR (Inter Partes Review)** outcomes at the USPTO Patent Trial and Appeal Board (PTAB), using the PTAB API and guidance from a practicing patent attorney.
+Predicting **IPR (Inter Partes Review)** outcomes at the USPTO Patent Trial and Appeal Board (PTAB) from the PTAB Open Data Portal API.
 
-This README is the running glossary and high-level map of the domain. Deeper notes live in [`docs/scope/domain_notes.md`](docs/scope/domain_notes.md).
+This README is the running glossary and high-level map of the domain.
 
 ---
 
@@ -83,7 +83,7 @@ The institution decision is **not** a separate target. A petition that fails ins
 
 ## 4. Fintiv Factors — context only, not a feature source
 
-Judges rate each of the six Fintiv factors on a consistent 5-point ordinal scale (heavily favors → heavily weighs against institution) in the institution decision. The decision is post-T₀, so **we do not read it**. Per `docs/scope/prediction_scope.md` §8.2 we extract only the petitioner's preemptive Fintiv framing from petition §IV (sales pitch, not ruling) — most usefully whether a Sotera stipulation is offered, since that's a binding commitment rather than rhetoric. The judge's actual factor-by-factor ruling stays available for evaluation / sanity-check, never as a feature.
+Judges rate each of the six Fintiv factors on a 5-point ordinal scale (heavily favors → heavily weighs against institution) in the institution decision. The decision is post-T₀, so it is **not** read as a feature. We extract only the petitioner's preemptive Fintiv framing from petition §IV — most usefully whether a Sotera stipulation is offered, since that's a binding commitment observable at T₀.
 
 ---
 
@@ -94,14 +94,14 @@ Institution rates swing with USPTO director appointments. The filing date effect
 ```mermaid
 timeline
     title PTAB discretionary-denial policy regimes
-    2020 Q1        : Fintiv factors introduced (Trump 1st term) — discretionary denials spike
+    2020 Q1        : Fintiv factors introduced — discretionary denials spike
     2020 Q4        : Sotera stipulation practice emerges — institution rates recover
-    2022           : Director memo neutralizes Fintiv (Biden) — institution rates surge
-    2025 Q1        : March 2025 memo reintroduces discretionary denials (Trump 2nd term)
-    2025 Q2        : New-format decisions expected (5–6 new factors) starting June 2025
+    2022           : Director memo neutralizes Fintiv — institution rates surge
+    2025 Q1        : March 2025 memo reintroduces discretionary denials
+    2025 Q2        : New-format institution decisions roll out (expanded factor set)
 ```
 
-Practitioner view: *"March 2025 is exactly like March 2020."* Expected cycle is policy change → panic → rate dip → practitioner adaptation → recovery → eventual reversal.
+The pattern across regimes: policy change → rate dip → adaptation → recovery → eventual reversal. Filing date is therefore both a temporal feature and a proxy for the policy regime in force at decision time.
 
 ---
 
@@ -124,7 +124,7 @@ The full per-feature catalog and tier demotions live in [`docs/features/admissib
 
 - The petition PDF is the **only** text source we read — every other admissible document is skipped (see `docs/scope/prediction_scope.md` §8.1). Net text-storage corpus-wide: ~4–5 GB.
 - Patent-side enrichment comes from the file-wrapper bulk products (`PASDL`, `PTMNFEE2`, `PTFWPRE`) — see `docs/scope/prediction_scope.md` §5.3.
-- District-court signals (parallel-litigation forum, jury date, Sotera stipulation) are extracted from the petition's §IV / §VI.B restatements — no external Docket Navigator lookup needed.
+- District-court signals (parallel-litigation forum, jury date, Sotera stipulation) are extracted from the petition's §IV / §VI.B restatements — no external docket lookup needed.
 - Pre-2022 trials use the legacy `Paper` document category; post-2022 use `PETITION`. The petition picker handles both — see `docs/api/proceedings.md`.
 
 ---
@@ -133,7 +133,6 @@ The full per-feature catalog and tier demotions live in [`docs/features/admissib
 
 - [`docs/`](docs/) — technical documentation (start here for API ↔ feature mapping)
 - [`docs/scope/prediction_scope.md`](docs/scope/prediction_scope.md) — what we predict, T₀ leakage rule, label taxonomy
-- [`docs/scope/domain_notes.md`](docs/scope/domain_notes.md) — full domain notes from practitioner calls
 - [`docs/api/proceedings.md`](docs/api/proceedings.md) — PTAB API proceedings-schema notes
 - [`docs/plans/2026-04-29-ingestion-pipeline.md`](docs/plans/2026-04-29-ingestion-pipeline.md) — ingestion plan (v1 = 4 stages, metadata-only; PDF stages deferred)
 - [`src/ml_uspto/`](src/ml_uspto/) — package source (`clients/`, `parse/`, `ingest/`, `schemas/`, `paths.py`)

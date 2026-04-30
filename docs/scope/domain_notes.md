@@ -1,6 +1,6 @@
 # Domain Notes — IPR Outcome Prediction
 
-Insights gathered from conversations with a practicing patent attorney (partner at a major IP firm, ~10 years experience in PTAB proceedings).
+Domain background for the IPR-outcome prediction project — terminology, regime cycles, document structure, and feature priorities.
 
 > **Scope reconciliation.** This doc captures the legal-domain *why* behind features. The authoritative *what / when / what's allowed* lives in `prediction_scope.md`. The class definition is now fixed as **binary** (FWD-all-claims-unpatentable = 1, everything else = 0; settled = 0; pending = excluded — see scope §3). Several features described below as "extractable from petition / preliminary response" are **petition-only** under the scope's leakage rule (§4) — POPRs are filed ~3 months after T₀ and excluded.
 
@@ -33,7 +33,7 @@ Judges rate each factor using consistent, predictable phrasing:
 
 Decision documents have **explicit headings** per factor ("factor one", "factor two", etc.), making extraction straightforward via term search or LLM classification — useful for **ground-truth Fintiv labels in evaluation**, not as features.
 
-The key practitioner question: **which factor is dispositive** — i.e., which one actually drives the outcome in a given case.
+The key analytical question: **which factor is dispositive** — i.e., which one actually drives the outcome in a given case.
 
 ### Structural Features from Petition Documents
 
@@ -55,22 +55,21 @@ Institution rates are heavily driven by the political appointment cycle of USPTO
 
 | Period | Policy Change | Effect |
 |--------|--------------|--------|
-| 2020 | Fintiv factors introduced (Trump 1st term) | Discretionary denials spike |
+| 2020 | Fintiv factors introduced | Discretionary denials spike |
 | Dec 2020 | Sotera stipulation practice emerges | Institution rates recover |
-| 2022 | Director memo neutralizes Fintiv (Biden term) | Massive increase in institution rates |
-| March 2025 | New memo reintroduces discretionary denial emphasis (Trump 2nd term) | Denials expected to spike again |
+| 2022 | Director memo neutralizes Fintiv | Institution rates surge |
+| March 2025 | New memo reintroduces discretionary denial emphasis | Denials spike again |
 
-The practitioner's assessment: "March 2025 is exactly like March 2020." The expected cycle: policy change -> panic -> rate dip -> practitioner adaptation (new stipulations, new arguments) -> rate recovery -> eventual policy reversal.
+The cycle across regimes is consistent: policy change → rate dip → adaptation (new stipulations, new arguments) → rate recovery → eventual reversal. March 2025 closely echoes the March 2020 shift.
 
 **Temporal features are likely the strongest macro predictor** — which policy regime a petition was filed under.
 
-## New Factors (Expected June 2025)
+## New Factors (June 2025 rollout)
 
-- A March 2025 memo introduces 5-6 new discretionary denial factors
-- May replace or supplement the existing Fintiv factors — unclear as of May 2025
-- New document types in the API: "petitioner discretionary brief", "patent owner discretionary brief"
-- Same API data source, new metadata identifiers
-- Decisions currently being issued still apply old Fintiv framework; new-format decisions expected starting June 2025
+- The March 2025 memo introduced 5–6 new discretionary-denial factors that supplement the existing Fintiv set.
+- New document types appeared in the API: "petitioner discretionary brief", "patent owner discretionary brief".
+- Same API data source, new metadata identifiers.
+- Decisions issued before mid-2025 apply the old Fintiv framework; new-format decisions began rolling out from June 2025.
 
 ## Revenue Incentive
 
@@ -107,7 +106,7 @@ The judge's per-factor Fintiv ratings and the dispositive factor are **excluded*
 ## Data Notes
 
 - Only a subset of institution decisions address Fintiv — many do not and should be filtered (relevant only for label-evaluation use, not as a feature input).
-- Practitioner has an annotated spreadsheet with labeled Fintiv sub-factors — potential **evaluation data** under the current scope, not training input.
-- For discretionary denial classification, the institution decision alone is sufficient — but it's post-T₀ and excluded from features.
-- Sotera stipulation: extractable from petition §IV.4 directly. Earlier framing assumed cross-referencing with district-court data (Docket Navigator) was needed; this is no longer required for our scope.
+- An annotated spreadsheet with labeled Fintiv sub-factors is available as potential **evaluation data** under the current scope, not training input.
+- For discretionary-denial classification, the institution decision alone is sufficient — but it's post-T₀ and excluded from features.
+- Sotera stipulation: extractable from petition §IV.4 directly. Earlier framing assumed cross-referencing with external district-court data was needed; this is no longer required for our scope.
 - District-court features beyond what petition §IV restates (e.g., judge docket congestion) remain genuinely external and out of scope for v1.
