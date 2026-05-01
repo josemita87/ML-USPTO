@@ -131,6 +131,12 @@ def join_all(
     labeled = labeled.dropna(subset=["petition_filing_date", "patent_number"]).copy()
     n_trials_labeled = len(labeled)
 
+    # Keep only the merge key + the two columns downstream actually consumes:
+    # `petition_filing_date_doc` for the T₀ cross-check below, and
+    # `petition_pdf_uri` as the handle for the deferred Tier 1/2 text-feature
+    # stage (see `docs/features/admissible_documents_analysis.md`). Petition
+    # metadata (title, category, document_id) carries no feature value and is
+    # left in `petitions.parquet` rather than ballooning the joined frame.
     petition_cols = ["trial_number", "petition_pdf_uri", "petition_filing_date_doc"]
     petitions_slim = petitions[petition_cols].copy()
     petitions_slim["trial_number"] = petitions_slim["trial_number"].astype(str)

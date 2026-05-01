@@ -184,6 +184,14 @@ class AdmissibilityPartition(BaseModel):
 class Petition(BaseModel):
     """One trial's picked petition row, produced by `parse.petitions`.
 
+    Scaffolding only — *not* the source of model features. The role of
+    `Petition` is to identify which filing is the petition, capture the
+    documents-side filing date for the T₀ cross-check, and carry
+    `petition_pdf_uri` as a handle. The actual petition features live
+    on `PetitionTextFeatures`, populated by the deferred Tier 1/2
+    pipeline (see `docs/scope/prediction_scope.md` §5 and
+    `docs/features/admissible_documents_analysis.md`).
+
     Built from `documentData.*` paths only. The `trialMetaData` block on a
     document row is the live trial header lagged by the documents-endpoint
     indexer cadence and is NOT frozen at T₀ — see `docs/api/proceedings.md`.
@@ -459,6 +467,12 @@ class PetitionTextDoc(BaseModel):
 
 class PetitionTextFeatures(BaseModel):
     """Tier 1 (structural) + Tier 2 (statutory + procedural) features per petition.
+
+    Produced by the deferred v2 pipeline that fetches each petition PDF
+    via the `petition_pdf_uri` handle on `Petition`, runs pdfplumber +
+    structured-regex extraction over the text, and emits this row. v1
+    ships the schema but not the producer (`docs/scope/prediction_scope.md`
+    §5; full feature catalog in `docs/features/admissible_documents_analysis.md`).
 
     `petition_word_count` is None when the Certificate of Word Count is
     missing/unparseable (~1–3% empirically) — honest missingness over a

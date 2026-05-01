@@ -30,6 +30,15 @@ post-T₀ contamination (`docs/api/proceedings.md` "What we observed").
 The proceedings-side `petition_filing_date` is the canonical T₀; the
 document-row `documentFilingDate` is preserved on
 `Petition.petition_filing_date_doc` for the joiner's cross-check.
+
+Scope note: `Petition` is **metadata only** — it identifies which
+document is the petition and where to fetch it (`petition_pdf_uri`),
+nothing more. None of its fields are model features. Per
+`docs/scope/prediction_scope.md` §5, v1 ships metadata-only and does
+not dereference the URI; the Tier 1 / Tier 2 text-feature pipeline
+that fetches the PDF, runs pdfplumber, and produces
+`PetitionTextFeatures` is deferred to v2 — see
+`docs/features/admissible_documents_analysis.md` for the full design.
 """
 
 from __future__ import annotations
