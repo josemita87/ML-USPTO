@@ -79,7 +79,7 @@ If a stage produces output when nothing changed upstream, the invariant is broke
 
 | Knob | Where set | Default | When to tune |
 |---|---|---|---|
-| `--retry-after-days` | `drivers/run_fetch_decision_pdfs.py` | 7 | Lower if a transient outage clears within hours; raise (or hand-quarantine) if a doc is permanently broken (image-only PDF, 410) |
+| `--retry-after-days` | `drivers/run_ingest_decision_texts.py` | 7 | Lower if a transient outage clears within hours; raise (or hand-quarantine) if a doc is permanently broken (image-only PDF, 410) |
 | `--rate-sleep` | same driver | 2.0s | Tighten only if PDF-bucket budget allows; default keeps cold-run within bucket |
 | `--limit` | same driver | none | Use for pre-flight smoke tests (e.g. `--limit 50`) before a full backfill |
 | Petition picker quarantine | `config/petition_picker.yaml` | (existing) | When a trial's filings shape changes and the picker mis-classifies |
@@ -129,5 +129,5 @@ One-time. Not a recurring stage in the state machine. After the seed, weekly cro
 - `src/ml_uspto/parse/decisions.py::enumerate_missing_fwd_pdfs` — the delta detector.
 - `src/ml_uspto/ingest/fetch.py::fetch_decision_pdfs` — failure-append loop.
 - `src/ml_uspto/schemas/enums.py::Frame`, `ingest/schemas/enums.py::Stage` — canonical key names.
-- `drivers/run_fetch_decision_pdfs.py` — driver flags + persistence on exit.
+- `drivers/run_ingest_decision_texts.py` — driver flags + persistence on exit.
 - `docs/api/rate_limits.md` — bucket quotas this lifecycle spends against.

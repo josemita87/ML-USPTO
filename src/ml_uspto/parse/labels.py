@@ -26,7 +26,7 @@ previous layer left unresolved:
      produced at fetch-time from the PDF) and run the same regex. Skipped
      silently when `storage=None` (unit-test mode) or when the text isn't
      cached. Backfilling the remaining FWD texts requires
-     `drivers/run_fetch_decision_pdfs.py` to widen the download set.
+     `drivers/run_ingest_decision_texts.py` to widen the download set.
 
 The empirical sentinel layer (matching `decisionData.trialOutcomeCategory`
 against `ALL_CLAIMS_UNPATENTABLE_OUTCOMES`) was removed in 2026-04 after
@@ -172,8 +172,7 @@ def build_labels(
     df = df.merge(terminating, on="trial_number", how="left")
 
     # Nullable Int64 so unresolved rows stay distinguishable from real
-    # zeros until the final dropna — the previous code path silently
-    # zero-filled every unresolved trial, contaminating the negative class.
+    # zeros until the final dropna
     df["cancelled"] = pd.array([pd.NA] * len(df), dtype="Int64")
 
     df.loc[df["trial_status"].isin(NON_FWD_LABEL_0_STATUSES), "cancelled"] = 0
@@ -226,7 +225,7 @@ def build_labels(
     if n_total and n_unresolved / n_total > 0.5:
         logger.warning(
             "More than half of post-filter trials lack a resolvable label "
-            "(%d / %d). Run `drivers/run_fetch_decision_pdfs.py` to expand "
+            "(%d / %d). Run `drivers/run_ingest_decision_texts.py` to expand "
             "the cached FWD-text set if you need a larger training corpus.",
             n_unresolved, n_total,
         )

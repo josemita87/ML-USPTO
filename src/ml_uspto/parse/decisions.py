@@ -3,7 +3,7 @@
 `enumerate_missing_fwd_pdfs(...)` walks the raw `Stage.DECISIONS` JSON
 cache and returns the candidate rows whose `cancelled` label is
 unresolvable by status + title, so a not-yet-cached FWD text blob is
-the only label source. Used by `drivers/run_fetch_decision_pdfs.py`.
+the only label source. Used by `drivers/run_ingest_decision_texts.py`.
 
 Per `docs/scope/prediction_scope.md` §3.1, this is restricted to
 *original* FWDs — on-remand and rehearing variants reference the

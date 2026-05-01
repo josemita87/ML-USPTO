@@ -4,8 +4,8 @@
 Runs the same code on cold start (~1.1k candidates today) and weekly cron
 (~30–50 deltas as new FWDs issue): `enumerate_missing_fwd_pdfs` derives the
 candidate list freshly each time from `Frame.TRIALS` + the raw
-`Stage.DECISIONS` cache + `has_blob` checks against `Stage.DECISION_TEXTS` +
-the `Frame.DECISION_PDF_FAILURES` parquet. There is no persistent manifest
+`Stage.DECISIONS` cache + `iter_blob_keys` lookup against `Stage.DECISION_TEXTS`
++ the `Frame.DECISION_PDF_FAILURES` parquet. There is no persistent manifest
 beyond the cache itself. Each successful fetch downloads the PDF,
 extracts full text via pdfplumber, and persists the text only — the
 binary is never written to disk.

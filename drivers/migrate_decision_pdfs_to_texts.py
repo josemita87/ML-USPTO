@@ -16,7 +16,6 @@ import argparse
 import io
 import logging
 import shutil
-from pathlib import Path
 
 import pdfplumber
 

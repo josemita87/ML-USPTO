@@ -77,8 +77,8 @@ all_claims_unpatentable_outcomes:
 # Empirically validated against 200 sampled FWD PDFs (2021–2026), of
 # which 133 are originals — see `drivers/probe_fwd_pdfs_sample.py`. After
 # the originals-only filter, 132/133 (99.2%) resolve to a label; 1
-# correctly quarantines (Motion-to-Amend ruling without a "Determining"
-# line).
+# correctly returns None (Motion-to-Amend ruling without a "Determining"
+# line) so the joiner drops it instead of mislabeling.
 #
 # The matcher is a list of (regex, label) patterns evaluated in order;
 # first match wins. This shape lets us encode the "Challenged" ambiguity
