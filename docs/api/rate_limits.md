@@ -25,10 +25,10 @@ Weekly quotas reset **Sunday at 00:00 UTC**.
 | `POST /trials/decisions/search/download` | `download_decisions()` | Metadata (5M/wk) — explicitly called out as "Search, Document Data, and Download" |
 | `GET /trials/{trial}/documents` | `get_trial_documents()` | Metadata (5M/wk) — "Document Data" is metadata tier |
 | `GET /trials/proceedings/{trial}` | `get_proceeding()` | Metadata (5M/wk) |
-| Fetching a PDF via `documentData.fileDownloadURI` | Not yet in client | Likely **File Wrapper Documents** (1.2M/wk) |
+| Fetching a PDF via `documentData.fileDownloadURI` | `download_pdf()` | Likely **File Wrapper Documents** (1.2M/wk) |
 | Downloading a bulk zip (e.g. `PTFWPRE`) | Not in client | **Bulk Downloads** (20/file/yr) |
 
-Note: `documentData.documentOCRText` returned inline by `search_decisions_post()` is a **500-char preview only** (confirmed 2026-04-24) — enough for the case caption and judge names, not the substantive decision text. Full decision text requires fetching the PDF via `documentData.fileDownloadURI`, which falls in the **File Wrapper Documents** bucket (1.2M/wk). Structured decision fields (`statuteAndRuleBag`, `issueTypeBag`, `trialOutcomeCategory`) remain genuinely free in the metadata bucket.
+Note: `documentData.documentOCRText` returned inline by `search_decisions_post()` is a **500-char preview only** (confirmed 2026-04-24) — enough for the case caption and judge names, not the substantive decision text. Full decision text requires fetching the PDF via `documentData.fileDownloadURI`, which falls in the **File Wrapper Documents** bucket (1.2M/wk). Structured decision fields (`statuteAndRuleBag`, `issueTypeBag`, `trialOutcomeCategory`) remain free in the metadata bucket, but `trialOutcomeCategory` is not granular enough for IPR FWD labels in the current corpus.
 
 ---
 
@@ -46,7 +46,7 @@ These apply to **every** request regardless of bucket:
 
 Serial-only. At ~10 req/sec sequential, the binding constraint is **wall-clock time from burst=1 serialization, not quota**.
 
-For the canonical cost model under the current scope, see **`../scope/prediction_scope.md` §5.4**. Summary: total live-API wall-clock ≈ **13–14 h**, dominated by ~10 h of petition PDF downloads at ~2 s/PDF × ~18K trials. Petition PDFs are now the only PDFs we fetch (~70 GB raw / ~2 GB extracted text), and decision PDFs have been cut as a feature source per `../scope/prediction_scope.md` §5.1. Earlier drafts estimated ~25K decision PDF fetches and a ~60 min total — both reflected the pre-cut pipeline and are superseded.
+For the canonical cost model under the current scope, see **`../scope/prediction_scope.md` §5.4**. Summary: the current feature pipeline is metadata-only and is dominated by patent file-wrapper enrichment. The only PDFs fetched today are original-FWD PDFs needed for label fallback, not petition-text features. Petition PDF downloads remain deferred to v2.
 
 ---
 
@@ -64,7 +64,7 @@ Guidelines for ingestion scripts:
 - Cache responses to disk as you go (`data/raw/`) so a partial run can resume without re-hitting the API.
 - For bulk zips: download once, never re-download — the 20-per-year cap is hard.
 
-> ⚠ **`fileDownloadURI` PDFs require the `X-API-Key` header.** Empirical (2026-04-27): a stratified probe of 50 petition PDFs returned `403 Forbidden` for every URL when fetched with a bare `requests.get(uri)`. The same URLs returned 200 when fetched through `client.session.get(uri)`, which carries the `X-API-Key` header set in `USPTOClient.__init__`. The URL shape (`https://api.uspto.gov/api/v1/patent/ptab-files/IPR/...`) looks like a static asset path but goes through the same auth gate as the search APIs. **PDF download code must reuse the authenticated session — bare `requests` calls will silently fail.**
+> ⚠ **`fileDownloadURI` PDFs require the `X-API-Key` header.** Empirical (2026-04-27): a stratified probe of 50 petition PDFs returned `403 Forbidden` for every URL when fetched with a bare `requests.get(uri)`. The same URLs returned 200 when fetched through `client.session.get(uri)`, which carries the `X-API-Key` header set in `USPTOClient.__init__`. The URL shape (`https://api.uspto.gov/api/v1/patent/ptab-files/IPR/...`) looks like a static asset path but goes through the same auth gate as the search APIs. **PDF download code must reuse `USPTOClient.download_pdf()` or the authenticated session — bare `requests` calls will silently fail.**
 
 ---
 

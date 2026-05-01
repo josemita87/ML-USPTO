@@ -56,9 +56,9 @@ Practical implication for modeling: we predict the **trial outcome** (month ~18)
 
 ## 2. Target Variable
 
-**IPR trial outcome** — exclusively. **Binary**: `1` = the patent owner lost (a Final Written Decision held all challenged claims unpatentable); `0` = anything else (institution denied, discretionary denial, settled before FWD, terminated procedurally, or FWD where any claim survived). The label is built from `trial_status` and decision-row outcome fields per the taxonomy in [`config/labels.yaml`](config/labels.yaml); see [`docs/scope/prediction_scope.md`](docs/scope/prediction_scope.md) §3 for the full rationale.
+**IPR trial outcome** — exclusively. **Binary**: `1` = the patent owner lost (a Final Written Decision held all challenged claims unpatentable); `0` = anything else (institution denied, discretionary denial, settled before FWD, terminated procedurally, or FWD where any claim survived). The label is built from `trial_status`, FWD title text when it contains the cover-page outcome, and cached FWD text for unresolved cases; see [`docs/scope/prediction_scope.md`](docs/scope/prediction_scope.md) §3 for the full rationale.
 
-The institution decision is **not** a separate target. A petition that fails institution is effectively a "claims survive" outcome for the patent owner, so the institution gate is absorbed into the trial-outcome label as `0`. The institution decision itself is post-T₀ — its text is **not** a feature source. The Fintiv / 325(d) / Sotera signals we use come from the petitioner's framing in petition §IV (advocacy at T₀), not from the judge's later ruling.
+The institution decision is **not** a separate target. A petition that fails institution is effectively a "claims survive" outcome for the patent owner, so the institution gate is absorbed into the trial-outcome label as `0`. The institution decision itself is post-T₀ — its text is **not** a feature source. Petition-side Fintiv / 325(d) / Sotera signals are admissible in principle because they come from the petitioner's T₀ framing, but they are **not in the current v1 feature matrix**; petition-text extraction is deferred.
 
 ---
 
@@ -81,9 +81,9 @@ The institution decision is **not** a separate target. A petition that fails ins
 
 ---
 
-## 4. Fintiv Factors — context only, not a feature source
+## 4. Fintiv Factors — currently context, future petition-text features
 
-Judges rate each of the six Fintiv factors on a 5-point ordinal scale (heavily favors → heavily weighs against institution) in the institution decision. The decision is post-T₀, so it is **not** read as a feature. We extract only the petitioner's preemptive Fintiv framing from petition §IV — most usefully whether a Sotera stipulation is offered, since that's a binding commitment observable at T₀.
+Judges rate each of the six Fintiv factors on a 5-point ordinal scale (heavily favors → heavily weighs against institution) in the institution decision. The decision is post-T₀, so it is **not** read as a feature. A future petition-text pipeline may extract the petitioner's preemptive Fintiv framing from petition §IV — most usefully whether a Sotera stipulation is offered — but v1 does not parse petition PDFs.
 
 ---
 
@@ -107,14 +107,21 @@ The pattern across regimes: policy change → rate dip → adaptation → recove
 
 ## 6. Feature Families
 
-All features must be observable at T₀ (petition filing). In rough priority order:
+All features must be observable at T₀ (petition filing).
 
-1. **Petition-text binary flags** — Fintiv addressed in §IV, 325(d) addressed, Sotera stipulation offered
-2. **Petition-text counts** — claims challenged, prior-art references, exhibits, expert declarations, grounds (102/103)
-3. **Temporal / regime** — filing date, policy-era indicator
-4. **Patent metadata** — technology center, patent age, CPC codes, NPE flag (from assignment chain)
-5. **Prosecution history** — office-action count, PTA, family size — all T₀-filtered (no `TRIAL*` events, no post-T₀ dates)
-6. **Time-correct base rates** — art-unit / tech-center cancellation rates over trials with terminating FWDs strictly before T₀
+Current v1 feature matrix:
+
+1. **Temporal / regime proxies** — filing year, month, and day-of-week.
+2. **Proceedings metadata** — technology center, art-unit group, petitioner / owner frequency.
+3. **Patent metadata** — CPC section, patent age, PTA, family size, assignment counts.
+4. **Prosecution history** — pre-T₀ event family counts, office-action counts, prosecution span. `TRIAL*` events and all post-T₀ dates are excluded.
+5. **Missingness regime flags** — no patent wrapper, no recorded assignment, nullable scalar indicators.
+
+Deferred feature families:
+
+1. **Petition-text binary flags** — Fintiv addressed in §IV, 325(d) addressed, Sotera stipulation offered.
+2. **Petition-text counts** — claims challenged, prior-art references, exhibits, expert declarations, grounds (102/103).
+3. **Time-correct base rates** — art-unit / tech-center cancellation rates over trials with terminating FWDs strictly before T₀.
 
 The full per-feature catalog and tier demotions live in [`docs/features/admissible_documents_analysis.md`](docs/features/admissible_documents_analysis.md). The leakage rule and disallowed sources live in [`docs/scope/prediction_scope.md`](docs/scope/prediction_scope.md) §4.
 
@@ -122,9 +129,9 @@ The full per-feature catalog and tier demotions live in [`docs/features/admissib
 
 ## 7. Data Notes (quick pointers)
 
-- The petition PDF is the **only** text source we read — every other admissible document is skipped (see `docs/scope/prediction_scope.md` §8.1). Net text-storage corpus-wide: ~4–5 GB.
-- Patent-side enrichment comes from the file-wrapper bulk products (`PASDL`, `PTMNFEE2`, `PTFWPRE`) — see `docs/scope/prediction_scope.md` §5.3.
-- District-court signals (parallel-litigation forum, jury date, Sotera stipulation) are extracted from the petition's §IV / §VI.B restatements — no external docket lookup needed.
+- Current feature extraction reads **no petition PDFs**. The only PDFs fetched today are unresolved original-FWD PDFs used to finish label construction; extracted text is cached under `decision_texts/` and is not a feature source.
+- Patent-side enrichment comes from the live `/applications/search` file-wrapper API, flattened into patent metadata and T₀-filtered event / assignment arrays. Bulk datasets remain a future scaling option; see `docs/api/bulk_datasets.md`.
+- District-court signals (parallel-litigation forum, jury date, Sotera stipulation) are candidate v2 petition-text features, not current v1 columns.
 - Pre-2022 trials use the legacy `Paper` document category; post-2022 use `PETITION`. The petition picker handles both — see `docs/api/proceedings.md`.
 
 ---
@@ -134,5 +141,6 @@ The full per-feature catalog and tier demotions live in [`docs/features/admissib
 - [`docs/`](docs/) — technical documentation (start here for API ↔ feature mapping)
 - [`docs/scope/prediction_scope.md`](docs/scope/prediction_scope.md) — what we predict, T₀ leakage rule, label taxonomy
 - [`docs/api/proceedings.md`](docs/api/proceedings.md) — PTAB API proceedings-schema notes
-- [`docs/plans/2026-04-29-ingestion-pipeline.md`](docs/plans/2026-04-29-ingestion-pipeline.md) — ingestion plan (v1 = 4 stages, metadata-only; PDF stages deferred)
+- [`docs/ops/refresh_lifecycle.md`](docs/ops/refresh_lifecycle.md) — current weekly refresh DAG and persistence model
+- [`docs/plans/2026-04-29-ingestion-pipeline.md`](docs/plans/2026-04-29-ingestion-pipeline.md) — historical ingestion plan
 - [`src/ml_uspto/`](src/ml_uspto/) — package source (`clients/`, `parse/`, `ingest/`, `schemas/`, `paths.py`)

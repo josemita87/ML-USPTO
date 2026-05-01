@@ -20,12 +20,12 @@ Probed 2026-04-24 — **47 products** in the catalog. Subset below is filtered f
 
 However, the gap is smaller than a "no bulk = manual per-record fetches" framing would suggest. Two live PTAB endpoints, both confirmed 2026-04-24, close most of it:
 
-- **`POST /trials/proceedings/search`** and **`POST /trials/decisions/search`** accept the ODP Simplified Query Syntax body (`filters`, `rangeFilters`, `fields`, `facets`, `sort`, `pagination`). Surgical server-side filtering + field trimming makes paginated API ingestion practical at the scale of the full PTAB docket (~19K proceedings, ~20K decisions). Structured decision fields (`statuteAndRuleBag`, `issueTypeBag`, `trialOutcomeCategory`, `appealOutcomeCategory`) come back for free — these cover 325(d), substantive grounds, and outcome labels without text parsing.
+- **`POST /trials/proceedings/search`** and **`POST /trials/decisions/search`** accept the ODP Simplified Query Syntax body (`filters`, `rangeFilters`, `fields`, `facets`, `sort`, `pagination`). Surgical server-side filtering + field trimming makes paginated API ingestion practical at the scale of the full PTAB docket (~19K proceedings, ~20K decisions). Structured decision fields (`statuteAndRuleBag`, `issueTypeBag`, `appealOutcomeCategory`) come back for free, but `trialOutcomeCategory` is not granular enough for IPR FWD labels in the current corpus; unresolved FWD outcomes require title / cover-page text parsing.
 - **`POST /trials/decisions/search/download`** exports the same result set as CSV or JSON (file attachment). Field projection is restricted — it does **not** support `documentData.documentOCRText` or `decisionData.appealOutcomeCategory`. Use it for tabular metadata exports, not rich text.
 
 **Caveat on decision text:** the `documentOCRText` field returned by the decisions endpoint is capped at 500 characters — a case-caption preview, not the full decision. Full decision text would require fetching the PDF via `documentData.fileDownloadURI`, but **decision PDFs are out of scope as a feature source** under `../scope/prediction_scope.md` §5.1; they remain accessible for label-evaluation only.
 
-**Implication:** trial-side data comes from the live `/trials/*` API, not bulk zips. The only PDFs we fetch are petition PDFs (~18K, ~4–5 GB total — `../scope/prediction_scope.md` §5.4). Bulk downloads remain useful for the patent-owner-side enrichment layer described in `../features/patent_file_wrapper_features.md`.
+**Implication:** trial-side data comes from the live `/trials/*` API, not bulk zips. The only PDFs we fetch in the current pipeline are FWD PDFs for label fallback; petition PDFs are deferred to v2. Bulk downloads remain useful as a future scaling option for the patent-owner-side enrichment layer described in `../features/patent_file_wrapper_features.md`, but current v1 uses the live `/applications/search` file-wrapper API.
 
 ---
 

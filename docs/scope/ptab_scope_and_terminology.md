@@ -15,8 +15,8 @@ These three terms are often used interchangeably in casual conversation but sit 
 | **Appeal** | Usually refers to **ex parte appeals** — appeals from an examiner's rejection during patent *prosecution* (before grant). Handled by PTAB but **not AIA trials**: no petitioner/patent-owner structure, no Fintiv, no institution gate. Separately, an FWD in an IPR can be appealed *out of* PTAB to the Federal Circuit (CAFC) — that is an appeal out of PTAB, not a PTAB proceeding. | N/A for this project | Out of scope — not modeled |
 
 **Implication for the pipeline:**
-- Proceedings = rows and the source of the target label (plus all static `trialMetaData` / party / patent fields ≤ T₀).
-- Decisions = label-only. The institution decision and FWD are post-T₀ and **excluded as feature sources** (`prediction_scope.md` §4). Institution-stage signals (Fintiv, 325(d), Sotera) are extracted from the *petition's* §IV at T₀ — see §5 below.
+- Proceedings = rows and the source of the coarse target label (plus all static `trialMetaData` / party / patent fields ≤ T₀).
+- Decisions = label-only. The institution decision and FWD are post-T₀ and **excluded as feature sources** (`prediction_scope.md` §4). Current v1 reads FWD text only to resolve labels; petition-side Fintiv / 325(d) / Sotera extraction is deferred to the v2 petition-text pipeline — see §5 below.
 - Appeals = filter out; they are a different proceeding category entirely.
 
 ### CAFC appeals — label handling, not a filter
@@ -60,7 +60,7 @@ The ODP catalog exposes two API families that both use the word "decisions." The
 
 | Family | URL path | Response bag | Deciding body | In scope? |
 |---|---|---|---|---|
-| **PTAB Trials — Decisions** | `/api/v1/patent/trials/decisions/*` | `patentTrialDocumentDataBag` | PTAB judges (AIA trial) | **Yes — core feature source** |
+| **PTAB Trials — Decisions** | `/api/v1/patent/trials/decisions/*` | `patentTrialDocumentDataBag` | PTAB judges (AIA trial) | **Yes — label source only** |
 | **Petition Decision Search** | `/api/v1/petition/decisions/*` | `petitionDecisionDataBag` | USPTO Office of Petitions | **No — prosecution-procedural, unrelated** |
 
 Telltale field on a record: `finalDecidingOfficeName: "OFFICE OF PETITIONS"` → wrong corpus. `trialNumber: "IPR…"` → right corpus.
@@ -182,14 +182,14 @@ In a normal courtroom you'd want all three to know what really happened. But our
 | 2 | The patent owner (defending) | Preliminary Response (POPR) | ~3 months after T₀ | **No — leaks** |
 | 3 | The PTAB judges (deciding) | Institution Decision | ~6 months after T₀ | **No — leaks** |
 
-### 5.2 We extract advocacy, not adjudication
+### 5.2 Future extraction: advocacy, not adjudication
 
-What's in the petition's §IV is the petitioner's *anticipated framing* — how they think the Fintiv analysis will go before anyone has pushed back. It is sales pitch, not ruling. Two consequences:
+What's in the petition's §IV is the petitioner's *anticipated framing* — how they think the Fintiv analysis will go before anyone has pushed back. It is sales pitch, not ruling. If v2 extracts Fintiv features, two consequences matter:
 
 1. **Quality is itself a feature.** A petition that walks all six factors with specific dates and citations signals a sophisticated, well-prepared petitioner. A petition that hand-waves §IV signals either a weak case or unsophisticated counsel. *Thoroughness of the discussion* predicts independently of whether the claims are correct.
 2. **Sotera stipulation is the exception.** Most Fintiv content is rhetoric, but the Sotera stipulation ("we will not pursue these invalidity arguments in district court") is a **binding commitment** the PTAB can hold the petitioner to. That single phrase is higher-signal than the rest of §IV combined.
 
-### 5.3 The six factors (extraction targets)
+### 5.3 The six factors (v2 extraction targets)
 
 The factors are standardized — *Fintiv* (PTAB 2020) lists them as a numbered set, so petitions follow the same numbering in §IV. Regex by factor number is reliable.
 
@@ -202,7 +202,7 @@ The factors are standardized — *Fintiv* (PTAB 2020) lists them as a numbered s
 | 5 | Petitioner = defendant? | Is the petitioner the same entity sued in court? | "Petitioner is a defendant in the parallel litigation" | binary `petitioner_is_defendant` |
 | 6 | Other circumstances | Any other reason for/against, including merits | "Our merits are very strong" — usually self-serving boilerplate | low-signal text |
 
-Practical extraction reduces to three things:
+Future petition-text extraction reduces to three things:
 
 1. Does §IV exist and address Fintiv at all? (binary — silence is itself a signal)
 2. Does it contain a Sotera-style stipulation? (regex on phrases like "will not pursue", "stipulate", "agree not to assert")

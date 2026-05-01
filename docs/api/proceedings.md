@@ -36,7 +36,7 @@ Empirical (probe of 1,000 IPR2022 records, 2026-04-27): the deepest the proceedi
 - Mixed (some claims survived) → label 0
 - All claims patentable → label 0
 
-The verdict-level field (`trialOutcomeCategory == "All Challenged Claims Unpatentable"` etc.) lives only on `decisionData` from `/trials/decisions/search`. Full-record dumps of FWD-status proceedings rows (IPR2025-00954 "Final Written Decision", IPR2025-00748 "Final Written Decision - Appealed", IPR2025-00742 "Terminated-Adverse Judgment") confirmed there is no hidden verdict field on the proceedings side.
+The FWD row lives in `decisionData` from `/trials/decisions/search`, but the verdict itself is not reliably structured there for IPRs: the current corpus returns generic `Final Written Decision` values rather than "All / Some / No Challenged Claims Unpatentable." Full-record dumps of FWD-status proceedings rows (IPR2025-00954 "Final Written Decision", IPR2025-00748 "Final Written Decision - Appealed", IPR2025-00742 "Terminated-Adverse Judgment") confirmed there is no hidden verdict field on the proceedings side. The granular verdict comes from FWD title text when present, otherwise the PDF cover page.
 
 **Empirical `trialStatusCategory` taxonomy (1000-record IPR2022 sample):**
 
@@ -66,8 +66,8 @@ The verdict-level field (`trialOutcomeCategory == "All Challenged Claims Unpaten
 | Need | Endpoint | Why |
 |---|---|---|
 | **Trial inventory + live label state** (status, terminationDate, latestDecisionDate, current categorization) | `POST /trials/proceedings/search` | Maintains the freshest trial-level state. One row per trial. Canonical source for the label. |
-| **Petition PDF URI + T₀ confirmation** | `POST /trials/documents/search` filtered by `trialNumber`, then `pick_petition()` | The petition row carries `documentData.fileDownloadURI` and `documentData.documentFilingDate` (= T₀). **Use only `documentData.*` fields from this row.** `trialMetaData` on the row is lagged and may be post-T₀. |
-| **Label assembly via decisions** (alternative to proceedings status) | `POST /trials/documents/search` filtered to `documentData.documentCategory: "FINAL"`, or `POST /trials/decisions/search` | FWD-type document rows have populated `decisionData` (`trialOutcomeCategory`, `issueTypeBag`, `statuteAndRuleBag`, `decisionIssueDate`). Per-corpus probe shows 1,822 FINAL rows across IPR. |
+| **Petition row + T₀ cross-check** | Corpus-wide `POST /trials/documents/search` filtered to `documentData.documentCategory IN ["PETITION", "Paper"]`, then `pick_petition()` per trial | The petition row carries `documentData.fileDownloadURI` and `documentData.documentFilingDate` (= document-side T₀ cross-check). **Use only `documentData.*` fields from this row.** `trialMetaData` on the row is lagged and may be post-T₀. |
+| **Label assembly via decisions** | `POST /trials/decisions/search` | FWD-type document rows identify the original FWD, issue date, title, document identifier, and PDF URI. `trialOutcomeCategory` is not granular enough for IPR labels in the current corpus, so unresolved labels fall back to FWD title / PDF cover-page parsing. |
 
 ## Field-by-field paths
 
@@ -126,7 +126,7 @@ The post-2022 taxonomy uses fine-grained categories (`PETITION`, `MOTION`, `RESP
 
 A multi-value filter `documentData.documentCategory IN ["PETITION", "Paper"]` returns **323,030 rows** (2026-04-28; 300,924 in earlier probes), of which only ~6% are actual petitions. Category alone cannot disambiguate.
 
-**Resolution: corpus-wide scan + title matcher + paper-number ceiling.** The canonical implementation lives in `src/ml_uspto/parse/petition_picker.py`. Empirical validation on a stratified probe of 239 trials (2012–2025, all terminal statuses): **98.7% clean recall, 0 false positives.** The remaining 1.3% fall through to a quarantine list rather than feeding wrong PDFs into the feature pipeline — the right failure mode for a leakage-sensitive system.
+**Resolution: corpus-wide scan + title matcher + paper-number ceiling.** The canonical implementation lives in `src/ml_uspto/parse/petitions.py`. Empirical validation on a stratified probe of 239 trials (2012–2025, all terminal statuses): **98.7% clean recall, 0 false positives.** Trials with no picked petition do not appear in `Frame.PETITIONS`, and the joiner drops them via the petition inner-join rather than inventing a fallback row.
 
 The strategy:
 
@@ -173,8 +173,8 @@ def pick_petition(rows):
     return cands[0][1] if cands else None
 ```
 
-3. **Reconcile + quarantine.** Left-join the picked rows against the proceedings inventory by `trialNumber`. Any trial without a picked row goes to a quarantine list for manual inspection — at 18K trials × ~1.3% miss = ~230 cases, manageable. **Do not silently drop quarantined trials.**
-4. **PDF download** — `GET <documentData.fileDownloadURI>` from each picked row.
+3. **Reconcile in the joiner.** The joiner inner-joins labeled trials to the picked petition roster by `trialNumber`. Missing petition rows are excluded from the training frame; `JoinReport.n_joined` is the audit count.
+4. **PDF download** — deferred v2 for petition-text features. Current v1 stores `documentData.fileDownloadURI` but does not fetch petition PDFs.
 
 ### Ambiguity classes the picker handles
 
@@ -191,9 +191,9 @@ Three failure modes were observed in earlier picker versions and are now defende
 | Exhibits with "petition" in title | "Ex. 2017 Notice of IPR Petition", "EX1020-Redlined Version of Proposed Corrected Petition" | `documentCategory == exhibit` filter |
 | Expert Declaration ... in Support of Petition | High paper number on declarations | `documentNumber < 10` ceiling |
 
-The picker is regression-tested against these fixtures; the suite lives next to `src/ml_uspto/parse/petition_picker.py` and locks in every example above.
+The picker is regression-tested against these fixtures in `tests/unit/test_petition_picker.py`; the implementation lives in `src/ml_uspto/parse/petitions.py`.
 
-## Petition PDF format — native text, no OCR required
+## Petition PDF format — native text, no OCR required for v2
 
 Stratified probe of 50 petitions across 2012, 2014, 2017, 2020, 2024 (10/year), 2026-04-27. For each picked petition: download via `documentData.fileDownloadURI`, extract text with `pdfplumber`, compute chars-per-page over the first 30 pages.
 
@@ -207,7 +207,7 @@ Stratified probe of 50 petitions across 2012, 2014, 2017, 2020, 2024 (10/year), 
 
 **46 / 46 successful downloads were native-text PDFs.** None fell below 800 chars/page; the threshold for "image PDF" is 100 chars/page (orders of magnitude separation, no borderline cases). Even the oldest 2012 cohort runs ~1,400 chars/page — USPTO has mandated e-filing of petitions since IPR's launch in 2012, and the empirical record matches.
 
-**Implication.** The text-feature pipeline can use a pure-Python parser (`pdfplumber` for layout-aware extraction, `pypdf` if speed becomes the constraint) **without an OCR fallback**. Quarantine any future image-PDF outliers rather than scaling up an OCR pipeline for a population we haven't observed. Re-run this probe on a larger stratified sample only if quarantine rates rise materially.
+**Implication.** The deferred petition-text pipeline can use a pure-Python parser (`pdfplumber` for layout-aware extraction, `pypdf` if speed becomes the constraint) **without an OCR fallback**. Quarantine any future image-PDF outliers rather than scaling up an OCR pipeline for a population we haven't observed. Re-run this probe on a larger stratified sample only if quarantine rates rise materially.
 
 **Ancillary finding — auth required for PDF URLs.** The `fileDownloadURI` URL shape (`https://api.uspto.gov/api/v1/patent/ptab-files/IPR/...`) looks like a static asset path but goes through the same `X-API-Key` gate as the search APIs. Bare `requests.get(uri)` returns 403 Forbidden for every petition; the authenticated `client.session.get(uri)` returns 200. PDF download code must reuse the authenticated session — see `rate_limits.md` §3.
 
@@ -216,9 +216,9 @@ Stratified probe of 50 petitions across 2012, 2014, 2017, 2020, 2024 (10/year), 
 Use both endpoints, with clear role separation:
 
 1. **Trial inventory, features, and label** — `proceedings/search` paginated. Canonical source for all `trialMetaData` and party-block fields. One row per trial with the freshest `trialStatusCategory`, `terminationDate`, etc.
-2. **Petition PDF URI + T₀ confirmation** — for each trial, `POST /trials/documents/search` filtered by `trialNumber`, then run `pick_petition()`. Read **only** `documentData.*` from the picked row. Ignore `trialMetaData` on this row — it is lagged and can carry post-T₀ values (see "What we observed").
-3. **PDF download** — `GET <documentData.fileDownloadURI>` from the picked row.
+2. **Petition row + T₀ cross-check** — corpus-wide `POST /trials/documents/search` filtered to `documentData.documentCategory IN ["PETITION", "Paper"]`, then run `pick_petition()` per trial. Read **only** `documentData.*` from the picked row. Ignore `trialMetaData` on this row — it is lagged and can carry post-T₀ values (see "What we observed").
+3. **Petition PDF download** — deferred v2. The current pipeline stores the URI only.
 
-The corpus-wide PETITION-only query (~6K rows) is *not* a viable shortcut — it misses ~12K legacy trials. The per-trial query is the actually-correct path.
+The corpus-wide PETITION-only query (~6K rows) is *not* a viable shortcut — it misses ~12K legacy trials. The correct corpus-scale path is the combined `PETITION` / `Paper` scan plus the title picker.
 
 See `api_feature_map.md` §1 for the full endpoint surface and `../scope/prediction_scope.md` §5.4 for the cost model.

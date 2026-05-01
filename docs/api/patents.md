@@ -45,7 +45,7 @@ Probe on 2026-04-27 against `applicationNumberText=14709428` (the patent in IPR2
 - `assignmentBag[*]` rows with `assignmentRecordedDate >= petitionFilingDate` — post-T₀ ownership transfers (often triggered by IPR loss).
 - `patentTermAdjustmentHistoryDataBag[*]` events after grant — though the *aggregate* PTA quantities (`aDelayQuantity`, `bDelayQuantity`, `cDelayQuantity`, `adjustmentTotalQuantity`) are computed at grant and frozen, so they're safe.
 
-**T₀-filter rule.** Every dated bag is filtered to `< petitionFilingDate` *before* aggregation. Status-as-of-now fields are excluded entirely. The leakage filter belongs in the parser, not in the model — keeping it close to the API surface is the only way to avoid silent re-introduction during feature engineering.
+**T₀-filter rule.** Every dated bag is filtered to `< petitionFilingDate` *before* aggregation. Status-as-of-now fields are excluded entirely. The raw patent parser preserves event / assignment arrays; the leakage filter runs in `features.transforms.build_features` after the trial join, where the canonical proceedings-side T₀ is available.
 
 ## Field-by-field paths
 
@@ -102,7 +102,7 @@ The full event-code dictionary is large (the probed patent alone has 47 distinct
 | A2 | Multi-section patents → use **section of the first CPC code** as the primary, optionally a multi-hot section vector if the model can use it. The first CPC is the examiner's primary classification. | The probed patent's first code is `H04W 88/06` (wireless networks) — that matches `technologyCenterNumber=2400` (TC 2400 = networks/multiplex). Empirical alignment confirms first-CPC = primary. |
 | A3 | Batch file-wrapper fetches through `/applications/search`; sub-paths only used for incremental refresh. | Search returns the same full-wrapper bag shape as the base path and reduces request count from O(applications) to O(applications / page_size). |
 | A4 | Dedup fetch by `applicationNumberText`, not `trialNumber`. | Joinder cases attach multiple trials to the same patent; per-trial fetching duplicates. |
-| A5 | T₀-filter applied at parse time, not at feature time. | The filter is a property of the API surface (events / assignments are interleaved with post-T₀ data). Pushing it downstream risks silent re-leakage during feature engineering. |
+| A5 | T₀-filter applied after the trial join, inside `features.transforms.build_features`. | The canonical T₀ comes from proceedings, not from the patent wrapper. The parser keeps dated arrays intact; feature engineering filters and aggregates them in one place. |
 | A6 | Aggregate event codes by prefix family (`M*`, `CT*`, `TRIAL*`, ...), not by enumerating codes. | The full code dictionary is undocumented and varies by examination era; families are stable. Final family list locked in `config/patents/event_codes.yaml` after corpus probe. |
 
 ## Recommended ingestion flow

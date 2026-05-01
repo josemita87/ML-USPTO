@@ -255,8 +255,8 @@ This audit confirmed all 33 references on this trial parse cleanly with regex.
 | Doc | Why skipped | Substitute |
 |---|---|---|
 | Paper 1 (POA) | Counsel info already in Petition §VI.C | Petition §VI.C |
-| Ex 1001 (the '083 patent) | Patent text is in PTFWPRE bulk + retrievable by patent number | `PTFWPRE` |
-| Ex 1002 (file history) | Same — file wrapper is bulk-distributed | `PTFWPRE` |
+| Ex 1001 (the '083 patent) | Patent metadata is available from the file-wrapper API; full patent text is future work | `/applications/search` / future bulk |
+| Ex 1002 (file history) | File-wrapper events are available from the file-wrapper API; full prosecution PDFs are not current features | `/applications/search` / future bulk |
 | Ex 1003 (Expert Declaration) | Expanded prose of the petition; the only useful signals (declaration filed? cited paragraph count?) are extractable from the petition itself (see §4.1) | Petition exhibit list + citations |
 | Ex 1031–1034, 1041–1043 (parallel-lawsuit exhibits) | Petition §IV / §VI.B restate the categorical facts (forum, dates, judge, co-defendants); exhibits add verification, not features | Petition §IV / §VI.B (see §5.1) |
 
@@ -273,29 +273,29 @@ Removing these from the read pipeline saves ~31.6 MB / trial × 18K trials ≈ *
 | 3 — Prior-art metadata (from exhibit list) | 9 |
 | **Total from admissible docs alone** | **54** |
 
-This is before joining the patent-side bulk products (PASDL, PTMNFEE2, PTFWPRE) which add file-wrapper, assignment, and maintenance-fee features per `patent_file_wrapper_features.md`.
+This is before joining the patent-side file-wrapper features described in `patent_file_wrapper_features.md`. Current v1 gets those from the live `/applications/search` API; bulk products remain a future scaling option.
 
-### v1 implementation subset
+### Deferred implementation subset
 
-`PetitionTextFeatures` in `src/ml_uspto/schemas/models.py` (PR 1) defines **~13 fields** — the core structural counts (word count, page count, claims challenged, grounds, exhibits, prior-art refs, expert declarations) and the highest-signal Tier-1 statutory/procedural booleans (n_grounds_102, n_grounds_103, has_sotera_stipulation, mentions_fintiv_factors, discloses_prior_iprs_same_patent, n_real_parties_in_interest, claim_construction_disputed_terms). The remaining ~40 features in this catalog (ranking-notice fields, prior-art exhibit-list derivations like `npl_share` / `mean_reference_age_at_critical_date`, finer §IV / §VI.B substructure) are deferred to v2 — schema-additive, no breaking change. NLP / embeddings on petition text (Tier 3 in `docs/plans/2026-04-29-ingestion-pipeline.md` §1) are explicitly out of scope for v1.
+`PetitionTextFeatures` in `src/ml_uspto/schemas/models.py` defines **~13 fields** — the core structural counts (word count, page count, claims challenged, grounds, exhibits, prior-art refs, expert declarations) and the highest-signal Tier-1 statutory/procedural booleans (n_grounds_102, n_grounds_103, has_sotera_stipulation, mentions_fintiv_factors, discloses_prior_iprs_same_patent, n_real_parties_in_interest, claim_construction_disputed_terms). This is a schema stub only today: the current v1 pipeline stores `petition_pdf_uri` but does not download petition PDFs or populate `PetitionTextFeatures`. The remaining ~40 features in this catalog (ranking-notice fields, prior-art exhibit-list derivations like `npl_share` / `mean_reference_age_at_critical_date`, finer §IV / §VI.B substructure) are later schema-additive work. NLP / embeddings on petition text remain out of scope for the first petition-text pass.
 
 ---
 
-## 9. What this means for ingestion
+## 9. What this means for v2 ingestion
 
-- **Mandatory per trial**: 1 petition PDF (~4 MB).
-- **Conditional per trial**: 1 ranking notice PDF (~0.14 MB), only when the petitioner stacks ≥2 petitions against the same patent.
+- **Mandatory per trial in v2**: 1 petition PDF (~4 MB).
+- **Conditional per trial in v2**: 1 ranking notice PDF (~0.14 MB), only when the petitioner stacks ≥2 petitions against the same patent.
 - **Never opened**: 33 prior-art exhibits + POA + challenged patent + file history + expert declaration + 7 parallel-lawsuit exhibits (~150 MB / trial saved).
 
-Corpus-wide text storage drops from the ~50–90 GB estimate in `../scope/prediction_scope.md` §5.4 (which assumed the whole petition pack) to **~4–5 GB** for petitions plus the small ranking-notice tail.
+Current v1 feature ingestion opens none of these PDFs. Corpus-wide v2 text storage should be limited to petitions plus the small ranking-notice tail.
 
 ---
 
 ## 10. Cross-references
 
 - `../scope/prediction_scope.md` §4 — leakage rule (the why behind the T₀ filter).
-- `../scope/prediction_scope.md` §5.2 — petition PDFs as the only text source.
+- `../scope/prediction_scope.md` §5.2 — petition PDF text features deferred to v2.
 - `patent_file_wrapper_features.md` — patent-side features that join on `patentNumber`.
 - `../examples/ipr_lifecycle_case_study.md` — the full lifecycle this scope deliberately ignores past T₀.
-- `src/ml_uspto/parse/admissibility.py` — the date-based filter that produced the 46-doc set.
-- `data/raw/proceedings/IPR2022-01002/admissible_documents.json` — the manifest.
+- `src/ml_uspto/parse/petitions.py` — current petition picker and assembler.
+- `src/ml_uspto/features/transforms.py` — current T₀-filtered structured-feature builder.

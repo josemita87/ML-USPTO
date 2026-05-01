@@ -1,5 +1,7 @@
 # Ingestion Pipeline — Systems Plan
 
+> **Historical note.** This was the implementation plan while the pipeline was being built. It is not the current operational reference. For the live DAG, persistence model, and FWD-text label fallback, use `../ops/refresh_lifecycle.md`; for current feature scope, use `../scope/prediction_scope.md`.
+
 **Date**: 2026-04-27 (v1 scope narrowed 2026-04-28; storage backend abstracted 2026-04-29; FWD-PDF label fallback scaffolded 2026-04-29)
 **Status**: stages 1–4 plumbing landed end-to-end. v1 deliverable `data/processed/joined_trials.parquet` produced. Outstanding: full patents cold-run (~120/~10K apps cached); FWD-outcome label resolution — regex + capture map for the FWD-PDF cover page now live in `config/labels.yaml::fwd_pdf_outcome` + `schemas/constants.py::FWD_PDF_*` (validated on 25 stratified FWDs), but the FWD-PDF download driver (under bucket `Stage.DECISION_PDFS`) and the `preprocess` fallthrough that runs the regex are not yet wired.
 **Scope (v1)**: end-to-end ingestion from "no local data" to a feature-ready parquet keyed by `trialNumber`, joining proceedings + petition pointer + patent. **Metadata-only.** PDF download and petition-text feature extraction (the original stages 5–6) are deferred to v2 — see `### v1 cut` below.

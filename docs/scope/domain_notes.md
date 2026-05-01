@@ -8,7 +8,7 @@ Domain background for the IPR-outcome prediction project — terminology, regime
 
 **IPR trial outcome — exclusively.** Binary classification: did the terminating Final Written Decision hold all challenged claims unpatentable? See `prediction_scope.md` §3 for full label coding.
 
-The institution decision is **not** a prediction target — this is a deliberate shift from the original framing. Institution-stage signals (Fintiv, 325(d), Sotera) remain central, but as *features* that help predict the downstream outcome. A petition that fails institution is effectively a "claims survive" outcome for the patent owner, so the institution gate is absorbed into the trial-outcome label.
+The institution decision is **not** a prediction target — this is a deliberate shift from the original framing. A petition that fails institution is effectively a "claims survive" outcome for the patent owner, so the institution gate is absorbed into the trial-outcome label. Institution-stage signals (Fintiv, 325(d), Sotera) remain candidate petition-text features, but they are deferred to v2 and are not in the current metadata-only feature matrix.
 
 ## High-Signal Features
 
@@ -16,13 +16,13 @@ The institution decision is **not** a prediction target — this is a deliberate
 
 | Feature | Description | Scope status |
 |---------|-------------|---|
-| Fintiv addressed | Whether the petition's §IV walks the six Fintiv factors | **In scope.** Petition §IV header detection. |
-| 325(d) addressed | Whether the petition discusses prior-PTO-consideration of the asserted art | **In scope.** Regex on `§ 325(d)` in petition. |
-| Sotera stipulation | Whether the petitioner committed not to raise the same invalidity arguments in district court | **In scope.** Extractable from petition §IV.4 (corrects earlier "external data needed" framing — see `ptab_scope_and_terminology.md` §5). |
+| Fintiv addressed | Whether the petition's §IV walks the six Fintiv factors | **Deferred v2.** Petition §IV header detection. |
+| 325(d) addressed | Whether the petition discusses prior-PTO-consideration of the asserted art | **Deferred v2.** Regex on `§ 325(d)` in petition. |
+| Sotera stipulation | Whether the petitioner committed not to raise the same invalidity arguments in district court | **Deferred v2.** Extractable from petition §IV.4 (corrects earlier "external data needed" framing — see `ptab_scope_and_terminology.md` §5). |
 
 ### Fintiv Sub-Factors (6 factors, ordinal scale)
 
-> **Scope note.** Judge-issued ratings live in the Institution Decision (post-T₀, excluded as a feature per scope §4). What we extract is the petitioner's **own framing of the six factors in petition §IV** — advocacy, not adjudication. See `ptab_scope_and_terminology.md` §5 for the full lifecycle and the six-factor extraction targets.
+> **Scope note.** Judge-issued ratings live in the Institution Decision (post-T₀, excluded as a feature per scope §4). What v2 may extract is the petitioner's **own framing of the six factors in petition §IV** — advocacy, not adjudication. See `ptab_scope_and_terminology.md` §5 for the full lifecycle and the six-factor extraction targets.
 
 Judges rate each factor using consistent, predictable phrasing:
 1. "heavily favors" institution
@@ -35,7 +35,7 @@ Decision documents have **explicit headings** per factor ("factor one", "factor 
 
 The key analytical question: **which factor is dispositive** — i.e., which one actually drives the outcome in a given case.
 
-### Structural Features from Petition Documents
+### Structural Features from Petition Documents (deferred v2)
 
 - Page count of the discretionary denial section (~2-3 pages in an ~80-100 page petition)
 - Procedural section (Sec. 314(a), 314(d) arguments) vs. substantive section (claim-by-claim prior art analysis)
@@ -93,13 +93,14 @@ Each IPR petition generates ~$40-50K in filing fees that the USPTO retains regar
 
 ## Feature Engineering Priorities
 
-All features must be observable at T₀ (petition filing) — see `prediction_scope.md` §4. Priorities:
+All features must be observable at T₀ (petition filing) — see `prediction_scope.md` §4. Current v1 implements the structured metadata / patent-wrapper subset; petition-text priorities below are deferred v2 candidates.
 
-1. **Petition binary flags**: Fintiv addressed (Y/N), 325(d) addressed (Y/N), Sotera stipulation present (Y/N) — all from petition §IV
-2. **Petition counts**: claims challenged, prior-art references, exhibits, expert declarations, grounds (102/103) — from §I.B grounds table + exhibit list
-3. **Temporal features**: petition filing date, policy-regime indicator (decision date is post-T₀ and excluded)
-4. **Patent metadata**: technology center, patent age, counsel identity, NPE flag (assignment chain)
-5. **Document-level features**: §IV section length, §I.B grounds-table density, §42.24 word-count utilization
+1. **Temporal features**: petition filing date, policy-regime proxy (decision date is post-T₀ and excluded).
+2. **Patent metadata**: technology center, patent age, CPC section, assignment-chain features.
+3. **Prosecution history**: T₀-filtered event counts, office-action counts, PTA, family size.
+4. **Deferred petition binary flags**: Fintiv addressed (Y/N), 325(d) addressed (Y/N), Sotera stipulation present (Y/N) — all from petition §IV.
+5. **Deferred petition counts**: claims challenged, prior-art references, exhibits, expert declarations, grounds (102/103) — from §I.B grounds table + exhibit list.
+6. **Deferred document-level features**: §IV section length, §I.B grounds-table density, §42.24 word-count utilization.
 
 The judge's per-factor Fintiv ratings and the dispositive factor are **excluded** as features (post-T₀ via institution decision); they remain available only as ground-truth labels for evaluation — see `ptab_scope_and_terminology.md` §5.4.
 
@@ -108,5 +109,5 @@ The judge's per-factor Fintiv ratings and the dispositive factor are **excluded*
 - Only a subset of institution decisions address Fintiv — many do not and should be filtered (relevant only for label-evaluation use, not as a feature input).
 - An annotated spreadsheet with labeled Fintiv sub-factors is available as potential **evaluation data** under the current scope, not training input.
 - For discretionary-denial classification, the institution decision alone is sufficient — but it's post-T₀ and excluded from features.
-- Sotera stipulation: extractable from petition §IV.4 directly. Earlier framing assumed cross-referencing with external district-court data was needed; this is no longer required for our scope.
-- District-court features beyond what petition §IV restates (e.g., judge docket congestion) remain genuinely external and out of scope for v1.
+- Sotera stipulation: extractable from petition §IV.4 directly once the deferred petition-text pipeline exists. Earlier framing assumed cross-referencing with external district-court data was needed.
+- District-court features beyond what petition §IV restates (e.g., judge docket congestion) remain genuinely external and out of scope for the current pipeline.
