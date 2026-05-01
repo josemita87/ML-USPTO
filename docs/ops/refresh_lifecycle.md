@@ -16,10 +16,10 @@ Anything ODP can re-serve gets re-derived each cycle. Anything we paid rate-limi
 |---|---|---|---|
 | Raw object cache | `<raw_root>/<Stage>/<key>.json` | Per-key overwrite (`save_object`) | API is source of truth; idempotent re-fetch picks up upstream mutations (status flips, reissued decisions) |
 | Tabular frames | `<processed_root>/<Frame>.parquet` | Whole-file overwrite (`save_frame`) | Re-flatten from raw is cheap; guarantees the frame matches current cache state |
-| PDF blobs | `<raw_root>/decision_pdfs/<doc_id>.pdf` | Append-only; gap detector skips cached keys | PDF-bucket is rate-limit-bound (~1.2M/wk); content is immutable once issued |
+| FWD text blobs | `<raw_root>/decision_texts/<doc_id>.txt` | Append-only; gap detector skips cached keys. Text is extracted via pdfplumber at fetch-time; the binary PDF is never persisted | PDF-bucket is rate-limit-bound (~1.2M/wk); content is immutable once issued |
 | Retry bookkeeping | `Frame.DECISION_PDF_FAILURES` | Append-only, with `failed_at` TTL | Carries state ODP doesn't (our retry window) |
 
-`Frame.PETITION_QUARANTINE` and `Frame.PATENT_QUARANTINE` follow the *frame* row (whole-file rewrite), not the accumulator row — they're re-derived from raw each cycle.
+`Frame.PATENT_QUARANTINE` follows the *frame* row (whole-file rewrite), not the accumulator row — it's re-derived from raw each cycle. Petition-side has no quarantine frame: trials with no pickable petition simply don't appear in `Frame.PETITIONS`, and the joiner drops them via inner-join.
 
 ---
 
@@ -36,13 +36,13 @@ flowchart LR
     features[features]
 
     trials --> decisions
-    trials --> petitions
     trials --> patents
     petitions --> patents
 
     decisions --> fwd
     fwd -. label resolution .-> joiner
 
+    trials --> joiner
     decisions --> joiner
     petitions --> joiner
     patents --> joiner
@@ -51,9 +51,9 @@ flowchart LR
 
 Order constraints:
 
-- **`trials` must land first.** Petitions, decisions, and patents all key off `Frame.TRIALS`.
-- **`decisions` and `petitions` are independent** — can run in parallel after trials.
-- **`patents` depends on `petitions`** (needs the picked petition row's `applicationNumberText` + `petitionFilingDate` for T₀).
+- **`trials` must land before decisions, patents, and joiner.** Decisions/patents key off `Frame.TRIALS`; joiner needs it for label construction and `no_documents` derivation.
+- **`petitions` runs in parallel with `trials` and `decisions`.** The corpus-wide documents/search scan and per-trial assembly are pure on the records iterator — `assemble_petitions` no longer reads `Frame.TRIALS`. The trial-side accounting (`no_documents` quarantine + T₀ cross-check) happens in the joiner where both rosters live on the same row.
+- **`patents` depends on both `trials` and `petitions`** (needs `applicationNumberText` from trials + the picked petition's `petitionFilingDate` for T₀).
 - **FWD-PDF backfill depends on `decisions`** (gap detector reads `Stage.DECISIONS` raw + `Frame.TRIALS`).
 - **Joiner waits on all of the above.** Features run last.
 
@@ -108,7 +108,7 @@ What to seed, in priority order:
 
 | Local | S3 | Why seed |
 |---|---|---|
-| `data/raw/decision_pdfs/*.pdf` | `s3://<bucket>/raw/decision_pdfs/` | PDF-bucket budget (~1.2M/wk, tightest); ~63 min wall-clock saved on first run |
+| `data/raw/decision_texts/*.txt` | `s3://<bucket>/raw/decision_texts/` | PDF-bucket budget (~1.2M/wk, tightest); ~63 min wall-clock saved on first run |
 | `data/raw/<Stage>/*.json` | `s3://<bucket>/raw/<Stage>/` | Metadata-bucket calls (5M/wk); patents stage is thousands of `/applications` calls |
 | `data/processed/*.parquet` | `s3://<bucket>/processed/` | Optional; re-derive cheap, but seeding lets first cloud run skip to features |
 
