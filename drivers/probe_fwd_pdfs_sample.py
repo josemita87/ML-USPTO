@@ -1,12 +1,13 @@
-"""Stage A — download a stratified sample of FWD PDFs to eyeball.
+"""Stage A — download a stratified sample of FWDs to eyeball.
 
 Walks `data/raw/decisions/page_*.json`, picks ~25 Final-Written-Decision
 documents spanning year × `documentTypeDescriptionText` × title-pattern
-diversity, downloads each PDF via `USPTOClient.download_pdf`, and caches
-under `Stage.DECISION_PDFS` keyed by `documentIdentifier`. Reports
-`pdfplumber` extractability on every fetched PDF.
+diversity, downloads each PDF via `USPTOClient.download_pdf`, extracts
+full text via pdfplumber, and caches the text under
+`Stage.DECISION_TEXTS` keyed by `documentIdentifier`. Reports
+extractability on every fetched PDF.
 
-The sample manifest (`data/raw/decision_pdfs/_sample_manifest.json`)
+The sample manifest (`data/raw/decision_texts/_sample_manifest.json`)
 captures the bucketing decisions so the picks are reproducible without
 re-running the walk.
 """
@@ -92,21 +93,18 @@ def _stratified_sample(
     return chosen
 
 
-def _try_extract(pdf_bytes: bytes) -> dict[str, Any]:
-    """Return a small extractability report for one PDF."""
+def _try_extract(pdf_bytes: bytes) -> tuple[str | None, dict[str, Any]]:
+    """Return (text, report) for one PDF. Text is None on failure."""
     try:
         with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-            n_pages = len(pdf.pages)
-            text_parts = [(p.extract_text() or "") for p in pdf.pages]
-        joined = "\n".join(text_parts)
-        return {
+            text = "\n".join((page.extract_text() or "") for page in pdf.pages)
+        return text, {
             "ok": True,
-            "n_pages": n_pages,
-            "n_chars": len(joined),
-            "first_100": joined[:100].replace("\n", " "),
+            "n_chars": len(text),
+            "first_100": text[:100].replace("\n", " "),
         }
     except Exception as exc:
-        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        return None, {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
 
 def main() -> None:
@@ -132,7 +130,7 @@ def main() -> None:
     sample = _stratified_sample(candidates, target=args.target, seed=args.seed)
     logger.info("Picked %d for download", len(sample))
 
-    manifest_dir = storage.raw_root / Stage.DECISION_PDFS.value
+    manifest_dir = storage.raw_root / Stage.DECISION_TEXTS.value
     manifest_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = manifest_dir / "_sample_manifest.json"
 
@@ -140,29 +138,36 @@ def main() -> None:
     enriched: list[dict[str, Any]] = []
     for i, c in enumerate(sample, 1):
         ident = c["document_identifier"]
-        cached = storage.load_blob(Stage.DECISION_PDFS.value, ident, "pdf")
-        if cached is None:
-            logger.info(
-                "[%d/%d] downloading %s (%s) %s",
-                i, len(sample), ident, c["year"], c["document_type"][:40]
-            )
-            payload = client.download_pdf(c["file_download_uri"])
-            storage.save_blob(Stage.DECISION_PDFS.value, ident, "pdf", payload)
-            time.sleep(args.rate_sleep)
-        else:
+        cached_text = storage.load_blob(Stage.DECISION_TEXTS.value, ident, "txt")
+        if cached_text is not None:
             logger.info("[%d/%d] cache hit %s", i, len(sample), ident)
-            payload = cached
+            text = cached_text.decode("utf-8", errors="replace")
+            report = {"ok": True, "n_chars": len(text), "first_100": text[:100].replace("\n", " ")}
+            enriched.append({**c, "size_bytes": len(cached_text), "extract": report})
+            continue
 
-        report = _try_extract(payload)
-        enriched.append({**c, "size_bytes": len(payload), "extract": report})
+        logger.info(
+            "[%d/%d] downloading %s (%s) %s",
+            i, len(sample), ident, c["year"], c["document_type"][:40]
+        )
+        payload = client.download_pdf(c["file_download_uri"])
+        text, report = _try_extract(payload)
+        if text is not None:
+            text_bytes = text.encode("utf-8")
+            storage.save_blob(Stage.DECISION_TEXTS.value, ident, "txt", text_bytes)
+            size = len(text_bytes)
+        else:
+            size = 0
+        time.sleep(args.rate_sleep)
+        enriched.append({**c, "size_bytes": size, "extract": report})
 
     manifest_path.write_text(json.dumps(enriched, indent=2))
     logger.info("Wrote sample manifest → %s", manifest_path)
 
     n_ok = sum(1 for e in enriched if e["extract"].get("ok"))
     n_text = sum(1 for e in enriched if e["extract"].get("n_chars", 0) > 1000)
-    print(f"sample: {len(enriched)} PDFs")
-    print(f"  pdfplumber open ok: {n_ok}/{len(enriched)}")
+    print(f"sample: {len(enriched)} FWDs")
+    print(f"  pdfplumber extract ok: {n_ok}/{len(enriched)}")
     print(f"  text-extractable (>1000 chars): {n_text}/{len(enriched)}")
 
 

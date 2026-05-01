@@ -7,18 +7,15 @@ silently corrupts a downstream feature pipeline.
 
 from datetime import date, datetime
 
-from ml_uspto.schemas.enums import PatentQuarantineReason, QuarantineReason
 from ml_uspto.schemas.models import (
     JoinedTrial,
     PatentFeatures,
     PatentFetchResult,
-    PatentQuarantineEntry,
     PdfFetchManifestRow,
     Petition,
     PetitionTextDoc,
     PetitionTextFeatures,
     Proceeding,
-    QuarantineEntry,
 )
 
 SAMPLE_PROCEEDING = {
@@ -89,15 +86,6 @@ def test_petition_minimal_construction():
     )
     assert p.petition_title is None
     assert p.petition_category is None
-
-
-def test_quarantine_entry_default_sample_titles_is_empty():
-    q = QuarantineEntry(
-        trial_number="IPR2014-00999",
-        reason=QuarantineReason.PICKER_NO_MATCH,
-        n_candidates=0,
-    )
-    assert q.sample_titles == []
 
 
 def test_patent_features_counters_default_to_zero():
@@ -177,15 +165,12 @@ def test_petition_text_features_word_count_optional_others_zero():
     assert feats.n_grounds_102 == 0
 
 
-def test_patent_quarantine_and_fetch_result_shape():
-    q = PatentQuarantineEntry(
+def test_patent_fetch_result_shape():
+    success = PatentFetchResult(
         application_number="14709428",
-        reason=PatentQuarantineReason.NOT_FOUND,
-        http_status=404,
-        error="missing",
+        raw_record={"applicationNumberText": "14709428"},
     )
-    result = PatentFetchResult(application_number="14709428", quarantine=q)
+    assert success.raw_record == {"applicationNumberText": "14709428"}
 
-    assert result.raw_record is None
-    assert result.quarantine is not None
-    assert result.quarantine.reason is PatentQuarantineReason.NOT_FOUND
+    miss = PatentFetchResult(application_number="00000000")
+    assert miss.raw_record is None

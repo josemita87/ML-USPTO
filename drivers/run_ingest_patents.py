@@ -1,13 +1,16 @@
-"""Stage 3 driver — fetch application file wrappers, write patent frames.
+"""Stage 3 driver — fetch application file wrappers, write `Frame.PATENTS`.
 
-Loads the `Frame.TRIALS` frame, deduplicates `application_number`, fetches
-file wrappers in `/applications/search` batches, then writes:
+Loads `Frame.TRIALS`, deduplicates `application_number`, fetches file
+wrappers in `/applications/search` batches, flattens via `Parser.PATENTS`.
+Per-application raw wrappers are cached under bucket `Stage.PATENTS`, so
+reruns resume cheaply.
 
-  - `Frame.PATENTS` — static-only flatten via `Parser.PATENTS`
-  - `Frame.PATENT_QUARANTINE` — applications not returned or otherwise unusable
+Failed fetches (404, 5xx, transport error, missing record) are logged and
+skipped — no quarantine frame, no negative cache. The next cron run retries
+each missing app automatically; over the 5M/wk metadata budget, retrying
+~50 stable failures weekly is noise.
 
-Use `--max-apps N` for smoke runs. Per-application raw wrappers are cached
-under bucket `Stage.PATENTS`, so reruns resume cheaply.
+Use `--max-apps N` for smoke runs.
 """
 
 import argparse
@@ -15,13 +18,12 @@ import logging
 
 import pandas as pd
 
-from ml_uspto.clients.storage.local import LocalStorage
+from ml_uspto.clients.storage import get_storage
 from ml_uspto.clients.uspto import USPTOClient
 from ml_uspto.ingest.fetch import fetch_patents
 from ml_uspto.parse.flatten import flatten, load_parser_config
 from ml_uspto.parse.schemas.enums import Parser
 from ml_uspto.schemas.enums import Frame
-from ml_uspto.schemas.models import PatentQuarantineEntry
 from ml_uspto.settings import get_settings
 
 
@@ -40,13 +42,13 @@ def main() -> None:
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
 
-    storage = LocalStorage()
+    storage = get_storage()
     trials = storage.load_frame(Frame.TRIALS, columns=["application_number"])
     apps_series = trials["application_number"].dropna().astype(str).str.strip()
     apps = list(dict.fromkeys(apps_series[apps_series != ""]))
 
     records: list[dict] = []
-    quarantine: list[PatentQuarantineEntry] = []
+    n_failed = 0
     batch_size = args.batch_size or get_settings().api.page_size
     for result in fetch_patents(
         storage,
@@ -57,30 +59,22 @@ def main() -> None:
     ):
         if result.raw_record is not None:
             records.append(result.raw_record)
-        if result.quarantine is not None:
-            quarantine.append(result.quarantine)
+        else:
+            n_failed += 1
 
     patents_df = (
         flatten(records, Parser.PATENTS)
         if records
         else pd.DataFrame(columns=list(load_parser_config(Parser.PATENTS)["columns"]))
     )
-    quarantine_df = (
-        pd.DataFrame([q.model_dump(mode="json") for q in quarantine])
-        if quarantine
-        else pd.DataFrame(columns=list(PatentQuarantineEntry.model_fields))
-    )
 
     storage.save_frame(patents_df, Frame.PATENTS)
-    storage.save_frame(quarantine_df, Frame.PATENT_QUARANTINE)
 
-    attempted = len(records) + len(quarantine)
+    attempted = len(records) + n_failed
     print(f"apps attempted: {attempted} / {len(apps)} unique")
     print(f"batch size: {batch_size}")
     print(f"patents: {len(patents_df)} rows -> frame {Frame.PATENTS.value}")
-    print(f"quarantine: {len(quarantine_df)} rows -> frame {Frame.PATENT_QUARANTINE.value}")
-    if attempted:
-        print(f"quarantine rate: {len(quarantine_df) / attempted:.1%}")
+    print(f"failed: {n_failed}")
 
 
 if __name__ == "__main__":

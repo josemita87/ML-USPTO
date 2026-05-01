@@ -1,34 +1,19 @@
-"""FWD decision label resolution + cache-gap detection.
+"""FWD decision-record walking + cache-gap detection.
 
-Two public functions, one domain — both deal with USPTO PTAB Final
-Written Decisions:
+`enumerate_missing_fwd_pdfs(...)` walks the raw `Stage.DECISIONS` JSON
+cache and returns the candidate rows whose `cancelled` label is
+unresolvable by status + title, so a not-yet-cached FWD text blob is
+the only label source. Used by `drivers/run_fetch_decision_pdfs.py`.
 
-  - `extract_outcome(text)` — runs the FWD outcome regex against either a
-    `documentTitleText` or extracted PDF cover-page text and returns the
-    binary `cancelled` label (1 / 0 / None). Pure function; consumed by
-    `parse.labels` (label pipeline) and by `enumerate_missing_fwd_pdfs`
-    below (gap probing).
-
-  - `enumerate_missing_fwd_pdfs(...)` — walks the raw `Stage.DECISIONS`
-    JSON cache and returns the candidate rows whose `cancelled` label is
-    unresolvable by status + title, so a not-yet-cached PDF cover page is
-    the only label source. Used by `drivers/run_fetch_decision_pdfs.py`.
-
-Per `docs/scope/prediction_scope.md` §3.1, both paths are restricted to
+Per `docs/scope/prediction_scope.md` §3.1, this is restricted to
 *original* FWDs — on-remand and rehearing variants reference the
 remanded subset rather than the originally-challenged set, and would
 yield wrong labels.
 
-The full title/cover-page phrasings the regex covers:
-
-    Determining All Challenged Claims Unpatentable          → 1
-    Determining No Challenged Claims Unpatentable           → 0
-    Determining Some Challenged Claims Unpatentable         → 0
-    Determining Challenged Claims <list> Unpatentable       → 0
-    Determining Challenged Claim(s) Unpatentable            → 1
-
-The (regex, label) list lives in `config/labels.yaml::fwd_pdf_outcome.patterns`
-and is exposed via `schemas.patterns.FWD_PDF_OUTCOME_PATTERNS`.
+Outcome regex → label collapse lives in `parse.labels.extract_outcome`
+(label construction is a labels concern); PDF→text extraction is
+inlined at each fetch-time call site (`ingest.fetch.fetch_decision_pdfs`
+and the FWD-PDF drivers).
 """
 
 from __future__ import annotations
@@ -40,37 +25,17 @@ import pandas as pd
 
 from ml_uspto.protocols.storage import Storage
 from ml_uspto.ingest.schemas.enums import Stage
+from ml_uspto.parse.labels import extract_outcome
 from ml_uspto.parse.schemas.enums import FwdPdfCandidateColumn as Col
 from ml_uspto.schemas.constants import (
     FWD_DECISION_TYPE_MARKER,
     FWD_ORIGINAL_MARKER,
-    FWD_PDF_COVER_PAGE_SEARCH_CHARS,
     NON_FWD_LABEL_0_STATUSES,
     NON_FWD_LABEL_1_STATUSES,
 )
 from ml_uspto.schemas.enums import TrialType
-from ml_uspto.schemas.patterns import FWD_PDF_OUTCOME_PATTERNS
 
 logger = logging.getLogger(__name__)
-
-
-def extract_outcome(text: str) -> int | None:
-    """Return the binary `cancelled` label from FWD title or PDF text.
-
-    Inspects the first `FWD_PDF_COVER_PAGE_SEARCH_CHARS` of `text` and
-    runs `FWD_PDF_OUTCOME_PATTERNS` in order; returns the first match's
-    label. Returns `None` if no pattern matches — caller's choice whether
-    to drop, quarantine, or fall back (image-scan PDFs, Motion-to-Amend
-    rulings without a "Determining" cover line, malformed text).
-
-    Same head-window applies to titles (which are far shorter than the
-    window) and to extracted PDF cover-page text.
-    """
-    head = text[:FWD_PDF_COVER_PAGE_SEARCH_CHARS]
-    for entry in FWD_PDF_OUTCOME_PATTERNS:
-        if entry.pattern.search(head) is not None:
-            return entry.label
-    return None
 
 
 def _iter_fwd_decisions(storage: Storage):
@@ -132,13 +97,13 @@ def enumerate_missing_fwd_pdfs(
     failures: pd.DataFrame | None = None,
     retry_after_days: int = 7,
 ) -> pd.DataFrame:
-    """Return candidate rows whose label requires a not-yet-cached FWD PDF.
+    """Return candidate rows whose label requires a not-yet-cached FWD text blob.
 
     Exclusion layers, applied in order:
       1. Non-IPR trials (we predict on IPR only).
       2. trial_status ∈ NON_FWD_LABEL_{0,1}_STATUSES — already 0/1.
       3. extract_outcome(document_title) is not None — title-resolvable.
-      4. PDF already cached at `Stage.DECISION_PDFS / <doc_id>.pdf`.
+      4. Text already cached at `Stage.DECISION_TEXTS / <doc_id>.txt`.
       5. doc_id has a failure entry within `retry_after_days`.
     """
     cols = [c.value for c in Col]
@@ -166,7 +131,7 @@ def enumerate_missing_fwd_pdfs(
     after_labels = candidates.loc[keep, cols].copy()
     n_after_labels = len(after_labels)
 
-    cached_keys = set(storage.iter_blob_keys(Stage.DECISION_PDFS.value, "pdf"))
+    cached_keys = set(storage.iter_blob_keys(Stage.DECISION_TEXTS.value, "txt"))
     after_cache = after_labels.loc[
         ~after_labels[Col.DOCUMENT_IDENTIFIER.value].astype(str).isin(cached_keys)
     ].copy()
@@ -180,11 +145,11 @@ def enumerate_missing_fwd_pdfs(
     n_final = len(after_cache)
 
     logger.info(
-        "FWD-PDF gap detector: %d original-FWD rows -> %d unresolvable-by-status/title "
+        "FWD-text gap detector: %d original-FWD rows -> %d unresolvable-by-status/title "
         "-> %d not cached -> %d after retry-window (retry_after_days=%d)",
         n_total, n_after_labels, n_after_cache, n_final, retry_after_days,
     )
     return after_cache.reset_index(drop=True)
 
 
-__all__ = ["extract_outcome", "enumerate_missing_fwd_pdfs"]
+__all__ = ["enumerate_missing_fwd_pdfs"]

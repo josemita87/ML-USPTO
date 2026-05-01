@@ -25,4 +25,3 @@ PAPER_NUMBER_CEILING: int = _cfg["paper_number_ceiling"]
 EXHIBIT_CATEGORIES: frozenset[DocumentCategory] = frozenset(
     DocumentCategory(s) for s in _cfg["exhibit_categories"]
 )
-QUARANTINE_SAMPLE_TITLES_LIMIT: int = _cfg["quarantine"]["sample_titles_limit"]

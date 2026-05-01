@@ -13,8 +13,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ml_uspto.schemas.enums import (
     DecisionPdfFailureReason,
-    PatentQuarantineReason,
-    QuarantineReason,
 )
 
 # ---------------------------------------------------------------------------
@@ -202,36 +200,18 @@ class Petition(BaseModel):
     petition_category: str | None = None
 
 
-class QuarantineEntry(BaseModel):
-    """Trial whose document list contains no row identifiable as the petition."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    trial_number: str
-    reason: QuarantineReason
-    n_candidates: int
-    sample_titles: list[str] = Field(default_factory=list)
-
-
-class PatentQuarantineEntry(BaseModel):
-    """Application whose file wrapper fetch failed or returned no usable record."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    application_number: str
-    reason: PatentQuarantineReason
-    http_status: int | None = None
-    error: str | None = None
-
-
 class PatentFetchResult(BaseModel):
-    """One application fetch outcome emitted by `ingest.fetch.fetch_patents`."""
+    """One application fetch outcome emitted by `ingest.fetch.fetch_patents`.
+
+    `raw_record` is None for failed fetches (404, 5xx, transport error,
+    missing record) — the fetcher logs the failure and moves on; the
+    next cron run retries automatically.
+    """
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="ignore")
 
     application_number: str
     raw_record: dict[str, Any] | None = None
-    quarantine: PatentQuarantineEntry | None = None
 
 
 class DecisionPdfFailure(BaseModel):
@@ -253,12 +233,13 @@ class DecisionPdfFailure(BaseModel):
 
 
 class DecisionPdfFetchResult(BaseModel):
-    """One PDF download outcome emitted by `ingest.fetch.fetch_decision_pdfs`.
+    """One FWD download outcome emitted by `ingest.fetch.fetch_decision_pdfs`.
 
-    On success, `bytes_written` is the size saved under
-    `Stage.DECISION_PDFS / <doc_id>.pdf`; on failure, `failure` carries the
-    diagnostic row to append to `Frame.DECISION_PDF_FAILURES`. Mutually
-    exclusive — exactly one of the two is populated.
+    On success, `bytes_written` is the size of the extracted text saved
+    under `Stage.DECISION_TEXTS / <doc_id>.txt` (the binary PDF is never
+    persisted); on failure, `failure` carries the diagnostic row to
+    append to `Frame.DECISION_PDF_FAILURES`. Mutually exclusive —
+    exactly one of the two is populated.
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -435,11 +416,9 @@ class JoinReport(BaseModel):
 
     n_trials_input: int
     n_trials_labeled: int
-    n_petition_quarantine: int
-    n_patent_quarantine: int
+    n_petition_t0_mismatch: int
     n_joined: int
     n_with_patent_features: int
-    n_without_patent_features: int
 
 
 class PdfFetchManifestRow(BaseModel):
@@ -512,7 +491,7 @@ class PetitionTextFeatures(BaseModel):
 
 
 class FwdOutcomePattern(NamedTuple):
-    """One FWD-PDF cover-page regex bound to its outcome label."""
+    """One FWD outcome regex bound to its label, applied to title or opinion text."""
 
     name: str
     pattern: re.Pattern[str]

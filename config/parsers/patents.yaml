@@ -44,10 +44,10 @@ decisions:
     document_type: documentData.documentTypeDescriptionText
     document_filing_date: documentData.documentFilingDate
     filing_party: documentData.filingPartyCategory
-    # documentIdentifier doubles as the PDF cache key under
-    # data/raw/decision_pdfs/<id>.pdf — needed by parse.labels'
-    # PDF-fallback label resolver for FWDs whose document_title doesn't
-    # encode the granular outcome.
+    # documentIdentifier doubles as the FWD-text cache key under
+    # data/raw/decision_texts/<id>.txt — needed by parse.labels'
+    # cached-text fallback label resolver for FWDs whose document_title
+    # doesn't encode the granular outcome.
     document_identifier: documentData.documentIdentifier
 
 # Documents/search rows. Only `documentData.*` paths are mapped here.

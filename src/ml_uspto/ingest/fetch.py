@@ -24,6 +24,7 @@ them under `data/raw/<bucket>/<key>.json`; an S3 backend uses the same
 
 from __future__ import annotations
 
+import io
 import logging
 import time
 from collections.abc import Callable, Iterable, Iterator
@@ -31,6 +32,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import pandas as pd
+import pdfplumber
 import requests
 
 from ml_uspto.protocols.storage import Storage
@@ -39,12 +41,11 @@ from ml_uspto.ingest.schemas.constants import PETITION_SCAN_CATEGORIES, STAGE_RE
 from ml_uspto.ingest.schemas.enums import Stage
 from ml_uspto.parse.flatten import flatten
 from ml_uspto.parse.schemas.enums import FwdPdfCandidateColumn, Parser
-from ml_uspto.schemas.enums import DecisionPdfFailureReason, Frame, PatentQuarantineReason
+from ml_uspto.schemas.enums import DecisionPdfFailureReason, Frame
 from ml_uspto.schemas.models import (
     DecisionPdfFailure,
     DecisionPdfFetchResult,
     PatentFetchResult,
-    PatentQuarantineEntry,
 )
 
 logger = logging.getLogger(__name__)
@@ -210,30 +211,6 @@ def _extract_patent_record(
     return out
 
 
-def _http_quarantine(
-    application_number: str, exc: requests.HTTPError, reason: PatentQuarantineReason
-) -> PatentQuarantineEntry:
-    response = exc.response
-    status = response.status_code if response is not None else None
-    return PatentQuarantineEntry(
-        application_number=application_number,
-        reason=reason,
-        http_status=status,
-        error=str(exc),
-    )
-
-
-def _cache_quarantine(storage: Storage, quarantine: PatentQuarantineEntry) -> None:
-    storage.save_object(
-        Stage.PATENTS,
-        quarantine.application_number,
-        {
-            "applicationNumber": quarantine.application_number,
-            "_fetch_error": quarantine.model_dump(mode="json"),
-        },
-    )
-
-
 def _fetch_patent_batch(
     storage: Storage, client: USPTOClient, application_numbers: list[str]
 ) -> Iterator[PatentFetchResult]:
@@ -248,27 +225,27 @@ def _fetch_patent_batch(
         # payload size for /applications/search — a few apps in any random
         # batch have file wrappers large enough that a 80-app batch
         # exceeds the API gateway's response cap. Recursive bisect isolates
-        # them; a single-app batch that still 413s is a genuine quarantine.
+        # them; a single-app batch that still 413s is a hard failure.
         status = exc.response.status_code if exc.response is not None else None
         if status == 413 and len(application_numbers) > 1:
             mid = len(application_numbers) // 2
             yield from _fetch_patent_batch(storage, client, application_numbers[:mid])
             yield from _fetch_patent_batch(storage, client, application_numbers[mid:])
             return
+        logger.warning(
+            "Patent batch HTTP error (status=%s, %d apps): %s",
+            status, len(application_numbers), exc,
+        )
         for app in application_numbers:
-            quarantine = _http_quarantine(app, exc, PatentQuarantineReason.HTTP_ERROR)
-            _cache_quarantine(storage, quarantine)
-            yield PatentFetchResult(application_number=app, quarantine=quarantine)
+            yield PatentFetchResult(application_number=app)
         return
     except requests.RequestException as exc:
+        logger.warning(
+            "Patent batch request error (%d apps): %s",
+            len(application_numbers), exc,
+        )
         for app in application_numbers:
-            quarantine = PatentQuarantineEntry(
-                application_number=app,
-                reason=PatentQuarantineReason.REQUEST_ERROR,
-                error=str(exc),
-            )
-            _cache_quarantine(storage, quarantine)
-            yield PatentFetchResult(application_number=app, quarantine=quarantine)
+            yield PatentFetchResult(application_number=app)
         return
 
     records = payload.get("patentFileWrapperDataBag") or []
@@ -283,13 +260,8 @@ def _fetch_patent_batch(
     for app in application_numbers:
         record = records_by_app.get(app)
         if record is None:
-            quarantine = PatentQuarantineEntry(
-                application_number=app,
-                reason=PatentQuarantineReason.NOT_FOUND,
-                error="Application not returned by /applications/search",
-            )
-            _cache_quarantine(storage, quarantine)
-            yield PatentFetchResult(application_number=app, quarantine=quarantine)
+            logger.info("Patent application %s not returned by /applications/search", app)
+            yield PatentFetchResult(application_number=app)
             continue
 
         payload = {"patentFileWrapperDataBag": [record]}
@@ -334,20 +306,12 @@ def fetch_patents(
             continue
 
         logger.debug("Patent application %s cache hit", app)
-        error = payload.get("_fetch_error")
-        if isinstance(error, dict):
-            cached_quarantine = PatentQuarantineEntry.model_validate(error)
-            yield PatentFetchResult(application_number=app, quarantine=cached_quarantine)
-            continue
-
         record = _extract_patent_record(payload, app)
         if record is None:
-            quarantine = PatentQuarantineEntry(
-                application_number=app,
-                reason=PatentQuarantineReason.EMPTY_RESPONSE,
-                error="No patentFileWrapperDataBag record in response",
-            )
-            yield PatentFetchResult(application_number=app, quarantine=quarantine)
+            # Cached payload exists but is shapeless (e.g. legacy `_fetch_error`
+            # stub from before quarantines were removed). Treat as a miss and
+            # let the next fetch attempt overwrite it.
+            pending.append(app)
             continue
 
         yield PatentFetchResult(application_number=app, raw_record=record)
@@ -370,15 +334,16 @@ def fetch_decision_pdfs(
     *,
     rate_sleep: float = 2.0,
 ) -> Iterator[DecisionPdfFetchResult]:
-    """Download each candidate FWD PDF, save under `Stage.DECISION_PDFS`,
-    yield one outcome per row.
+    """Download each candidate FWD PDF, extract text, save under
+    `Stage.DECISION_TEXTS`, yield one outcome per row.
 
     `candidates` is the frame returned by
     `parse.decisions.enumerate_missing_fwd_pdfs` — already filtered for
     cache hits and recent failures, so every row is a fresh attempt.
-    Successful downloads land at `Stage.DECISION_PDFS / <doc_id>.pdf`;
-    failures yield a `DecisionPdfFailure` row for the caller to persist
-    into `Frame.DECISION_PDF_FAILURES`.
+    Successful downloads run pdfplumber over the PDF bytes and land the
+    full opinion text at `Stage.DECISION_TEXTS / <doc_id>.txt`; the
+    binary is never persisted. Failures yield a `DecisionPdfFailure`
+    row for the caller to persist into `Frame.DECISION_PDF_FAILURES`.
 
     `rate_sleep` is a fixed inter-request pause to stay well under the
     PDF-bucket budget (~1.2M requests/week — much tighter than metadata).
@@ -443,8 +408,21 @@ def fetch_decision_pdfs(
             )
             continue
 
-        storage.save_blob(Stage.DECISION_PDFS.value, doc_id, "pdf", payload)
-        yield DecisionPdfFetchResult(document_identifier=doc_id, bytes_written=len(payload))
+        try:
+            with pdfplumber.open(io.BytesIO(payload)) as pdf:
+                text = "\n".join((page.extract_text() or "") for page in pdf.pages)
+        except Exception as exc:  # noqa: BLE001 — pdfplumber raises a zoo of types
+            yield _fail(
+                doc_id, trial_number, uri,
+                DecisionPdfFailureReason.REQUEST_ERROR,
+                error=f"pdfplumber: {type(exc).__name__}: {exc}"[:500],
+            )
+            time.sleep(rate_sleep)
+            continue
+
+        text_bytes = text.encode("utf-8")
+        storage.save_blob(Stage.DECISION_TEXTS.value, doc_id, "txt", text_bytes)
+        yield DecisionPdfFetchResult(document_identifier=doc_id, bytes_written=len(text_bytes))
         time.sleep(rate_sleep)
 
 

@@ -32,22 +32,6 @@ class TrialOutcome(StrEnum):
     ALL_CHALLENGED_CLAIMS_UNPATENTABLE = "All Challenged Claims Unpatentable"
 
 
-class QuarantineReason(StrEnum):
-    """Why a trial failed petition assembly. Emitted in `QuarantineEntry.reason`."""
-
-    PICKER_NO_MATCH = "picker_no_match"  # picker ran but rejected every candidate
-    NO_DOCUMENTS = "no_documents"  # trial absent from documents/search corpus
-
-
-class PatentQuarantineReason(StrEnum):
-    """Why an application file wrapper could not be fetched or parsed."""
-
-    NOT_FOUND = "not_found"
-    HTTP_ERROR = "http_error"
-    REQUEST_ERROR = "request_error"
-    EMPTY_RESPONSE = "empty_response"
-
-
 class DecisionPdfFailureReason(StrEnum):
     """Why an FWD PDF download failed. Persisted in `Frame.DECISION_PDF_FAILURES`
     rows so the gap-detector can quarantine retryably (see
@@ -70,9 +54,7 @@ class Frame(StrEnum):
     TRIALS = "trials"
     DECISIONS = "decisions"
     PETITIONS = "petitions"
-    PETITION_QUARANTINE = "petition_quarantine"
     PATENTS = "patents"
-    PATENT_QUARANTINE = "patent_quarantine"
     DECISION_PDF_FAILURES = "decision_pdf_failures"
     JOINED_TRIALS = "joined_trials"
 

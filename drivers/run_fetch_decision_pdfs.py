@@ -1,12 +1,14 @@
-"""Stage 5 driver — backfill FWD PDFs whose label can't be resolved from
+"""Stage 5 driver — backfill FWD texts whose label can't be resolved from
 `trial_status` or `documentTitleText`, append failure rows for retry.
 
 Runs the same code on cold start (~1.1k candidates today) and weekly cron
 (~30–50 deltas as new FWDs issue): `enumerate_missing_fwd_pdfs` derives the
 candidate list freshly each time from `Frame.TRIALS` + the raw
-`Stage.DECISIONS` cache + `has_blob` checks against `Stage.DECISION_PDFS` +
+`Stage.DECISIONS` cache + `has_blob` checks against `Stage.DECISION_TEXTS` +
 the `Frame.DECISION_PDF_FAILURES` parquet. There is no persistent manifest
-beyond the cache itself.
+beyond the cache itself. Each successful fetch downloads the PDF,
+extracts full text via pdfplumber, and persists the text only — the
+binary is never written to disk.
 
 Flags:
   --dry-run           : run the gap-detector and print count + sample, no fetch.
@@ -20,7 +22,7 @@ import logging
 
 import pandas as pd
 
-from ml_uspto.clients.storage.local import LocalStorage
+from ml_uspto.clients.storage import get_storage
 from ml_uspto.protocols.storage import Storage
 from ml_uspto.ingest.fetch import fetch_decision_pdfs
 from ml_uspto.clients.uspto import USPTOClient
@@ -59,7 +61,7 @@ def main() -> None:
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
 
-    storage = LocalStorage()
+    storage = get_storage()
     trials = storage.load_frame(Frame.TRIALS)
     failures = _load_failures(storage)
 

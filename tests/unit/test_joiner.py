@@ -1,3 +1,4 @@
+import logging
 from datetime import date
 from pathlib import Path
 
@@ -14,7 +15,7 @@ def _trials_frame() -> pd.DataFrame:
       - LABEL_BY_STATUS_0 → trial_status = "Institution Denied"
       - LABEL_BY_FWD_1    → trial_status = "Final Written Decision" + decisions FWD
                             with trialOutcome = "All Challenged Claims Unpatentable"
-      - QUARANTINED       → no petition row → dropped by inner-join
+      - NO_PETITION       → labeled but no petition row → dropped by inner-join
     """
     return pd.DataFrame(
         [
@@ -39,7 +40,7 @@ def _trials_frame() -> pd.DataFrame:
                 "technology_center": "2400",
             },
             {
-                "trial_number": "IPR2022-QUARANTINED",
+                "trial_number": "IPR2022-NO_PETITION",
                 "trial_type": "IPR",
                 "trial_status": "Terminated-Settled",
                 "petition_filing_date": date(2022, 8, 1),
@@ -75,7 +76,7 @@ def _decisions_frame() -> pd.DataFrame:
     )
 
 
-def _petitions_frame() -> pd.DataFrame:
+def _petitions_frame(fwd_doc_date: date = date(2022, 5, 23)) -> pd.DataFrame:
     return pd.DataFrame(
         [
             {
@@ -86,20 +87,10 @@ def _petitions_frame() -> pd.DataFrame:
             {
                 "trial_number": "IPR2022-LABEL_BY_FWD_1",
                 "petition_pdf_uri": "https://example/p2.pdf",
-                "petition_filing_date_doc": date(2022, 5, 23),
+                "petition_filing_date_doc": fwd_doc_date,
             },
         ]
     )
-
-
-def _petition_quarantine_frame() -> pd.DataFrame:
-    return pd.DataFrame(
-        [{"trial_number": "IPR2022-QUARANTINED", "reason": "picker_no_match"}]
-    )
-
-
-def _patent_quarantine_frame() -> pd.DataFrame:
-    return pd.DataFrame(columns=["application_number", "reason"])
 
 
 @pytest.fixture
@@ -127,20 +118,22 @@ def storage_with_payloads(tmp_path: Path) -> LocalStorage:
     return storage
 
 
-def test_join_all_excludes_petition_quarantine(storage_with_payloads):
+def test_join_all_drops_labeled_trials_without_petition_row(storage_with_payloads):
+    """A labeled trial with no row in `petitions` is excluded from the
+    joined frame via inner-join. `n_trials_labeled − n_joined` captures
+    the count.
+    """
     df, report = join_all(
         storage_with_payloads,
         trials=_trials_frame(),
         decisions=_decisions_frame(),
         petitions=_petitions_frame(),
-        petition_quarantine=_petition_quarantine_frame(),
-        patent_quarantine=_patent_quarantine_frame(),
     )
 
     assert set(df["trial_number"]) == {"IPR2022-LABEL_BY_STATUS_0", "IPR2022-LABEL_BY_FWD_1"}
     assert report.n_trials_input == 3
-    assert report.n_petition_quarantine == 1
     assert report.n_joined == 2
+    assert report.n_trials_labeled - report.n_joined == 1
 
 
 def test_join_all_assigns_correct_labels(storage_with_payloads):
@@ -149,8 +142,6 @@ def test_join_all_assigns_correct_labels(storage_with_payloads):
         trials=_trials_frame(),
         decisions=_decisions_frame(),
         petitions=_petitions_frame(),
-        petition_quarantine=_petition_quarantine_frame(),
-        patent_quarantine=_patent_quarantine_frame(),
     )
 
     by_trial = df.set_index("trial_number")["cancelled"].to_dict()
@@ -164,8 +155,6 @@ def test_join_all_aggregates_patent_features_with_t0(storage_with_payloads):
         trials=_trials_frame(),
         decisions=_decisions_frame(),
         petitions=_petitions_frame(),
-        petition_quarantine=_petition_quarantine_frame(),
-        patent_quarantine=_patent_quarantine_frame(),
     )
 
     by_trial = df.set_index("trial_number")
@@ -180,26 +169,6 @@ def test_join_all_aggregates_patent_features_with_t0(storage_with_payloads):
     assert report.n_with_patent_features == 2
 
 
-def test_join_all_marks_quarantined_apps_without_features(storage_with_payloads):
-    patent_qn = pd.DataFrame(
-        [{"application_number": "14000002", "reason": "http_error"}]
-    )
-    df, report = join_all(
-        storage_with_payloads,
-        trials=_trials_frame(),
-        decisions=_decisions_frame(),
-        petitions=_petitions_frame(),
-        petition_quarantine=_petition_quarantine_frame(),
-        patent_quarantine=patent_qn,
-    )
-
-    fwd = df.set_index("trial_number").loc["IPR2022-LABEL_BY_FWD_1"]
-    assert pd.isna(fwd["n_events_pre_t0"])
-    assert pd.isna(fwd["cpc_section"])
-    assert report.n_patent_quarantine == 1
-    assert report.n_with_patent_features == 1
-
-
 def test_join_all_handles_missing_cache(tmp_path: Path):
     empty = LocalStorage(raw_root=tmp_path / "raw", processed_root=tmp_path / "processed")
     df, report = join_all(
@@ -207,10 +176,42 @@ def test_join_all_handles_missing_cache(tmp_path: Path):
         trials=_trials_frame(),
         decisions=_decisions_frame(),
         petitions=_petitions_frame(),
-        petition_quarantine=_petition_quarantine_frame(),
-        patent_quarantine=_patent_quarantine_frame(),
     )
 
     assert report.n_with_patent_features == 0
-    assert report.n_without_patent_features == len(df)
+    assert report.n_joined - report.n_with_patent_features == len(df)
     assert df["n_events_pre_t0"].isna().all()
+
+
+def test_join_warns_on_t0_mismatch_proceedings_wins(storage_with_payloads, caplog):
+    """When `petition_filing_date` (proceedings) != `petition_filing_date_doc`
+    (documents), the joiner logs a warning and the proceedings-side T₀
+    drives the patent aggregation.
+    """
+    # Diverges from proceedings (2022-05-23) by 5 days.
+    petitions = _petitions_frame(fwd_doc_date=date(2022, 5, 28))
+    with caplog.at_level(logging.WARNING, logger="ml_uspto.parse.joiner"):
+        df, report = join_all(
+            storage_with_payloads,
+            trials=_trials_frame(),
+            decisions=_decisions_frame(),
+            petitions=petitions,
+        )
+
+    assert report.n_petition_t0_mismatch == 1
+    assert any("T₀ mismatch" in m for m in caplog.messages)
+    # Proceedings-side T₀ drives the days_grant_to_petition arithmetic.
+    fwd = df.set_index("trial_number").loc["IPR2022-LABEL_BY_FWD_1"]
+    assert fwd["days_grant_to_petition"] == (date(2022, 5, 23) - date(2017, 1, 1)).days
+
+
+def test_join_no_warning_when_t0_matches(storage_with_payloads, caplog):
+    with caplog.at_level(logging.WARNING, logger="ml_uspto.parse.joiner"):
+        _, report = join_all(
+            storage_with_payloads,
+            trials=_trials_frame(),
+            decisions=_decisions_frame(),
+            petitions=_petitions_frame(),
+        )
+    assert report.n_petition_t0_mismatch == 0
+    assert not any("T₀ mismatch" in m for m in caplog.messages)

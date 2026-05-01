@@ -19,16 +19,14 @@ previous layer left unresolved:
      direct 0/1 (covers Institution Denied, Settled, Adverse Judgment, …).
   2. **`document_title` regex.** ~41% of original FWDs encode the
      granular ruling directly in the API-returned title text
-     ("Determining All Challenged Claims Unpatentable …"). Apply
-     `parse.decisions.extract_outcome` to the title.
-  3. **PDF cover-page fallback.** For trials still unresolved, load the
-     cached FWD PDF (`Stage.DECISION_PDFS / <document_identifier>.pdf`),
-     extract page 0 via pdfplumber, and run the same regex. Skipped
-     silently when `storage=None` (unit-test mode) or when the PDF isn't
-     cached. Backfilling the remaining PDFs requires
-     `drivers/probe_fwd_pdfs_sample.py` (or a successor) to widen the
-     download set — at the current 200-PDF sample only ~5-10% of
-     unresolved-by-title trials have a cached PDF.
+     ("Determining All Challenged Claims Unpatentable"); `extract_outcome`
+     applies the FWD outcome regex to the title.
+  3. **Cached FWD-text fallback.** For trials still unresolved, load the
+     cached FWD text blob (`Stage.DECISION_TEXTS / <document_identifier>.txt`,
+     produced at fetch-time from the PDF) and run the same regex. Skipped
+     silently when `storage=None` (unit-test mode) or when the text isn't
+     cached. Backfilling the remaining FWD texts requires
+     `drivers/run_fetch_decision_pdfs.py` to widen the download set.
 
 The empirical sentinel layer (matching `decisionData.trialOutcomeCategory`
 against `ALL_CLAIMS_UNPATENTABLE_OUTCOMES`) was removed in 2026-04 after
@@ -42,30 +40,51 @@ caller (`parse.joiner`) gets a fully-labeled `cancelled` int column.
 
 from __future__ import annotations
 
-import io
 import logging
 
 import pandas as pd
 
 from ml_uspto.protocols.storage import Storage
 from ml_uspto.ingest.schemas.enums import Stage
-from ml_uspto.parse.decisions import extract_outcome
 from ml_uspto.schemas.constants import (
     FWD_DECISION_TYPE_MARKER,
     FWD_ORIGINAL_MARKER,
+    FWD_PDF_COVER_PAGE_SEARCH_CHARS,
     NON_FWD_LABEL_0_STATUSES,
     NON_FWD_LABEL_1_STATUSES,
     PENDING_STATUSES,
 )
 from ml_uspto.schemas.enums import TrialType
+from ml_uspto.schemas.patterns import FWD_PDF_OUTCOME_PATTERNS
 
 logger = logging.getLogger(__name__)
+
+
+def extract_outcome(text: str) -> int | None:
+    """Return the binary `cancelled` label from FWD title or opinion text.
+
+    Inspects the first `FWD_PDF_COVER_PAGE_SEARCH_CHARS` of `text` and
+    runs `FWD_PDF_OUTCOME_PATTERNS` in order; returns the first match's
+    label. Returns `None` if no pattern matches — caller's choice whether
+    to drop, quarantine, or fall back (image-scan PDFs, Motion-to-Amend
+    rulings without a "Determining" cover line, malformed text).
+
+    The head-window cap is a *correctness* guard — it stops a stray
+    "Determining …" inside a citation deeper in the opinion from
+    overriding the cover-page ruling. Same window applies to titles
+    (which are far shorter than the window) and to full opinion text.
+    """
+    head = text[:FWD_PDF_COVER_PAGE_SEARCH_CHARS]
+    for entry in FWD_PDF_OUTCOME_PATTERNS:
+        if entry.pattern.search(head) is not None:
+            return entry.label
+    return None
 
 
 def _identify_terminating_fwd(decisions: pd.DataFrame) -> pd.DataFrame:
     """Return one row per trial with the terminating-FWD metadata needed
     for label resolution: `terminating_outcome`, `document_title`, and
-    `document_identifier` (for PDF cache lookup).
+    `document_identifier` (for text-blob lookup).
 
     Filters to *original* FWDs only — `documentTypeDescriptionText`
     matching both `FWD_DECISION_TYPE_MARKER` ("Final Written Decision",
@@ -110,7 +129,7 @@ def _identify_terminating_fwd(decisions: pd.DataFrame) -> pd.DataFrame:
     )
     # Backfill any column the upstream parquet doesn't carry (e.g. a stale
     # decisions.parquet predating the document_identifier yaml entry) with
-    # NaN — the PDF-fallback layer just no-ops on those rows.
+    # NaN — the cached-text fallback layer just no-ops on those rows.
     for col in ("document_title", "document_identifier"):
         if col not in terminating.columns:
             terminating[col] = pd.NA
@@ -125,8 +144,8 @@ def build_labels(
     """Join proceedings + decisions, derive the binary `cancelled` label.
 
     Returns one row per labeled trial (rows whose label couldn't be
-    resolved are dropped). When `storage` is given, the PDF-cover-page
-    fallback runs against `Stage.DECISION_PDFS`; when None, only
+    resolved are dropped). When `storage` is given, the cached-text
+    fallback runs against `Stage.DECISION_TEXTS`; when None, only
     title-based extraction is attempted.
     """
     logger.info("Raw proceedings: %d", len(proceedings))
@@ -169,33 +188,22 @@ def build_labels(
     else:
         n_title = 0
 
-    n_pdf_resolved = 0
-    n_pdf_attempted = 0
+    n_text_resolved = 0
+    n_text_attempted = 0
     if storage is not None and "document_identifier" in df.columns:
-        import pdfplumber  # noqa: PLC0415 — heavy; only loaded when PDF fallback runs
-
         unresolved = df.index[df["cancelled"].isna() & df["document_identifier"].notna()]
-        n_pdf_attempted = len(unresolved)
+        n_text_attempted = len(unresolved)
         for idx in unresolved:
             doc_id = str(df.at[idx, "document_identifier"]).strip()
             if not doc_id:
                 continue
-            payload = storage.load_blob(Stage.DECISION_PDFS.value, doc_id, "pdf")
+            payload = storage.load_blob(Stage.DECISION_TEXTS.value, doc_id, "txt")
             if payload is None:
                 continue
-            # extract_outcome only inspects the first FWD_PDF_COVER_PAGE_SEARCH_CHARS
-            # of the PDF text, so reading page 0 alone is sufficient for the regex
-            # patterns. Skipping the remaining ~50 pages saves ~50× per PDF.
-            try:
-                with pdfplumber.open(io.BytesIO(payload)) as pdf:
-                    text = pdf.pages[0].extract_text() or "" if pdf.pages else ""
-            except Exception as exc:  # noqa: BLE001 — pdfplumber raises a zoo of types
-                logger.warning("pdfplumber failed on %s: %s", doc_id, exc)
-                continue
-            label = extract_outcome(text)
+            label = extract_outcome(payload.decode("utf-8", errors="replace"))
             if label is not None:
                 df.at[idx, "cancelled"] = label
-                n_pdf_resolved += 1
+                n_text_resolved += 1
 
     df = df.dropna(subset=["petition_filing_date", "patent_number"])
 
@@ -206,9 +214,9 @@ def build_labels(
     df["technology_center"] = df["technology_center"].astype(str).str.strip()
 
     logger.info(
-        "Label resolution — status: %d, title: %d, pdf: %d/%d cached. "
-        "Dropped %d unresolved (no FWD on file or no cached PDF).",
-        n_status, n_title, n_pdf_resolved, n_pdf_attempted, n_unresolved,
+        "Label resolution — status: %d, title: %d, text: %d/%d cached. "
+        "Dropped %d unresolved (no FWD on file or no cached text).",
+        n_status, n_title, n_text_resolved, n_text_attempted, n_unresolved,
     )
     logger.info(
         "Final dataset: %d rows (%.1f%% cancelled)",
@@ -218,8 +226,11 @@ def build_labels(
     if n_total and n_unresolved / n_total > 0.5:
         logger.warning(
             "More than half of post-filter trials lack a resolvable label "
-            "(%d / %d). Run the PDF-backfill driver to expand the cached "
-            "FWD-PDF set if you need a larger training corpus.",
+            "(%d / %d). Run `drivers/run_fetch_decision_pdfs.py` to expand "
+            "the cached FWD-text set if you need a larger training corpus.",
             n_unresolved, n_total,
         )
     return df
+
+
+__all__ = ["extract_outcome", "build_labels"]

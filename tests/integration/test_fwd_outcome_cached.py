@@ -1,15 +1,17 @@
-"""Integration tests for `parse.decisions.extract_outcome` against real
-FWD PDFs cached under `data/raw/decision_pdfs/`.
+"""Integration tests for `parse.labels.extract_outcome` against real
+FWD opinion text cached under `data/raw/decision_texts/`.
 
-These tests intentionally read PDFs from the live cache rather than
+These tests intentionally read text from the live cache rather than
 checked-in fixtures: the regex is the load-bearing label-extraction logic
 for the whole project, and the only credible test is "does it parse
 real-world FWDs from across the year/format spectrum". The sample is
-populated by `drivers/probe_fwd_pdfs_sample.py` and persisted in
-`_sample_manifest.json`; this test fails informatively if the cache is
-empty or if the regex misses any cached PDF.
+populated by `drivers/probe_fwd_pdfs_sample.py` (which downloads PDFs,
+extracts text via pdfplumber at fetch-time, and persists the text +
+manifest) and persisted in `_sample_manifest.json`; this test fails
+informatively if the cache is empty or if the regex misses any cached
+text.
 
-Two complementary checks per PDF:
+Two complementary checks per FWD:
 
   * **Resolution** — the regex must hit and the leading capture word must
     map to a known label. A miss is a hard failure: the YAML pattern is
@@ -18,30 +20,28 @@ Two complementary checks per PDF:
   * **Cross-validation against the API title** — for the ~40% of FWDs
     whose `documentTitleText` already encodes the outcome (matched by
     `PARSEABLE_TITLE_RE` in the probe driver), we re-derive the label
-    from the title and assert it agrees with the PDF-extracted label.
+    from the title and assert it agrees with the text-extracted label.
     Disagreement is either a regex bug or USPTO indexing drift; both
     are worth surfacing.
 """
 
 from __future__ import annotations
 
-import io
 import json
 import re
 from pathlib import Path
 
-import pdfplumber
 import pytest
 
-from ml_uspto.parse.decisions import extract_outcome
+from ml_uspto.parse.labels import extract_outcome
 from ml_uspto.schemas.constants import FWD_ORIGINAL_MARKER
 
-PDF_CACHE_DIR = Path("data/raw/decision_pdfs")
-MANIFEST_PATH = PDF_CACHE_DIR / "_sample_manifest.json"
+TEXT_CACHE_DIR = Path("data/raw/decision_texts")
+MANIFEST_PATH = TEXT_CACHE_DIR / "_sample_manifest.json"
 
 # Title-side ground truth for the cross-validation test. "Challenged" is
 # optional because ~3% of FWDs omit it ("Determining All Claims
-# Unpatentable"). Kept independent from the PDF-side patterns so the
+# Unpatentable"). Kept independent from the cover-page patterns so the
 # agreement check exercises two distinct extraction processes.
 TITLE_OUTCOME_RE = re.compile(
     r"determining\s+(all|no|some)\s+(?:challenged\s+)?claims?",
@@ -72,9 +72,8 @@ def _load_manifest() -> list[dict]:
     return [e for e in json.loads(MANIFEST_PATH.read_text()) if _is_original(e)]
 
 
-def _extract_pdf_text(pdf_path: Path) -> str:
-    with pdfplumber.open(io.BytesIO(pdf_path.read_bytes())) as pdf:
-        return "\n".join((page.extract_text() or "") for page in pdf.pages)
+def _read_text(doc_id: str) -> str:
+    return (TEXT_CACHE_DIR / f"{doc_id}.txt").read_text(encoding="utf-8", errors="replace")
 
 
 _MANIFEST = _load_manifest()
@@ -84,9 +83,9 @@ _MANIFEST = _load_manifest()
 def manifest_entries() -> list[dict]:
     if not _MANIFEST:
         pytest.skip(
-            f"No FWD PDF sample cached. Run "
+            f"No FWD text sample cached. Run "
             f"`uv run python drivers/probe_fwd_pdfs_sample.py --target 200` "
-            f"to populate {PDF_CACHE_DIR}."
+            f"to populate {TEXT_CACHE_DIR}."
         )
     return _MANIFEST
 
@@ -97,27 +96,27 @@ def manifest_entries() -> list[dict]:
     ids=[e["document_identifier"] for e in _MANIFEST] or ["empty"],
 )
 def test_extraction_resolves_or_correctly_quarantines(entry: dict) -> None:
-    """`extract_outcome` returns None or 0/1; title-parseable PDFs must resolve.
+    """`extract_outcome` returns None or 0/1; title-parseable FWDs must resolve.
 
     Returning None is a legitimate outcome — Motion-to-Amend rulings, for
     example, have no "Determining" line on their cover page. The caller's
     contract is to quarantine those rather than guess.
 
     The strong invariant we *do* enforce: if the API's
-    `documentTitleText` already encodes the outcome, then the PDF
-    extraction must also resolve. A None on a title-parseable PDF means
+    `documentTitleText` already encodes the outcome, then the text
+    extraction must also resolve. A None on a title-parseable FWD means
     pdfplumber drift or a regression in the patterns.
     """
     if not _MANIFEST:
-        pytest.skip("No PDF sample cached")
-    pdf_path = PDF_CACHE_DIR / f"{entry['document_identifier']}.pdf"
-    assert pdf_path.exists(), f"Missing cached PDF: {pdf_path}"
-    text = _extract_pdf_text(pdf_path)
+        pytest.skip("No FWD text sample cached")
+    text_path = TEXT_CACHE_DIR / f"{entry['document_identifier']}.txt"
+    assert text_path.exists(), f"Missing cached text: {text_path}"
+    text = _read_text(entry["document_identifier"])
     label = extract_outcome(text)
     assert label is None or label in (0, 1)
     if TITLE_OUTCOME_RE.search(entry.get("document_title", "") or ""):
         assert label is not None, (
-            f"Title-parseable PDF {entry['document_identifier']} returned None — "
+            f"Title-parseable FWD {entry['document_identifier']} returned None — "
             f"pattern regression. title={entry['document_title'][:80]!r}"
         )
 
@@ -132,17 +131,17 @@ def test_extraction_resolves_or_correctly_quarantines(entry: dict) -> None:
     ]
     or ["empty"],
 )
-def test_pdf_label_agrees_with_title(entry: dict) -> None:
+def test_text_label_agrees_with_title(entry: dict) -> None:
     """For title-parseable FWDs, regex output must agree with the title."""
     if not _MANIFEST:
-        pytest.skip("No PDF sample cached")
+        pytest.skip("No FWD text sample cached")
     title_label = _label_from_title(entry["document_title"])
     assert title_label is not None  # filtered above
-    text = _extract_pdf_text(PDF_CACHE_DIR / f"{entry['document_identifier']}.pdf")
-    pdf_label = extract_outcome(text)
-    assert pdf_label == title_label, (
+    text = _read_text(entry["document_identifier"])
+    text_label = extract_outcome(text)
+    assert text_label == title_label, (
         f"Disagreement on {entry['document_identifier']} "
-        f"(year={entry['year']}): title says {title_label}, PDF says {pdf_label}. "
+        f"(year={entry['year']}): title says {title_label}, text says {text_label}. "
         f"Title: {entry['document_title']!r}"
     )
 
@@ -168,9 +167,7 @@ def test_overall_resolution_rate(manifest_entries: list[dict]) -> None:
     pattern_hits: dict[str, int] = {}
 
     for entry in manifest_entries:
-        text = _extract_pdf_text(
-            PDF_CACHE_DIR / f"{entry['document_identifier']}.pdf"
-        )
+        text = _read_text(entry["document_identifier"])
         label = extract_outcome(text)
         if label in (0, 1):
             n_resolved += 1
@@ -191,13 +188,13 @@ def test_overall_resolution_rate(manifest_entries: list[dict]) -> None:
 
     quarantine_rate = (n - n_resolved) / n if n else 0.0
     print(
-        f"\nFWD outcome regex stats over {n} ORIGINAL FWD PDFs:\n"
+        f"\nFWD outcome regex stats over {n} ORIGINAL FWDs:\n"
         f"  resolved (0/1):                   {n_resolved}/{n}\n"
         f"  quarantined (None):               {n - n_resolved}/{n} "
         f"({quarantine_rate:.1%})\n"
         f"  quarantined doc ids:              {quarantined}\n"
         f"  title-parseable subset:           {n_title_parseable}/{n}\n"
-        f"  title↔PDF agreement (parseable):  {n_title_agree}/{n_title_parseable}\n"
+        f"  title↔text agreement (parseable): {n_title_agree}/{n_title_parseable}\n"
         f"  pattern-hit distribution:          {dict(sorted(pattern_hits.items()))}"
     )
     assert quarantine_rate <= QUARANTINE_RATE_CEILING, (
@@ -209,5 +206,5 @@ def test_overall_resolution_rate(manifest_entries: list[dict]) -> None:
     )
     assert n_title_agree == n_title_parseable, (
         f"Disagreement on {n_title_parseable - n_title_agree}/"
-        f"{n_title_parseable} title-parseable PDFs — see per-PDF failures."
+        f"{n_title_parseable} title-parseable FWDs — see per-PDF failures."
     )

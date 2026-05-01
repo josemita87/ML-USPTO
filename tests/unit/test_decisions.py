@@ -95,7 +95,7 @@ def _trials_frame() -> pd.DataFrame:
 def seeded_storage(tmp_path: Path) -> LocalStorage:
     storage = LocalStorage(raw_root=tmp_path / "raw", processed_root=tmp_path / "processed")
     storage.save_object(Stage.DECISIONS.value, "page_001", _decisions_page())
-    storage.save_blob(Stage.DECISION_PDFS.value, "444", "pdf", b"%PDF-1.4 cached")
+    storage.save_blob(Stage.DECISION_TEXTS.value, "444", "txt", b"cached opinion text")
     return storage
 
 

@@ -61,17 +61,9 @@ exhibit_categories:
 # petitions in OTHER but 44% of titles contained the word "petition" in
 # non-petition contexts (sur-replies, ranking docs, refund requests). A
 # tiny slice of recent split-filing trials does file the operative
-# `[PUBLIC] Petition for IPR …` under category=OTHER — those will land
-# in `picker_no_match` quarantine, which is the right failure mode for
+# `[PUBLIC] Petition for IPR …` under category=OTHER — accepted miss for
 # a leakage-sensitive system.
 scan_filter:
   document_categories:
     - PETITION
     - Paper
-
-# Stage 2 quarantine output. Consumed by `parse.petition_assembler`.
-quarantine:
-  # How many candidate-row titles to attach to a `picker_no_match` entry to
-  # aid manual triage. Five is enough to spot the pattern (corrected
-  # petitions, exotic phrasings, etc.) without bloating the parquet.
-  sample_titles_limit: 5
