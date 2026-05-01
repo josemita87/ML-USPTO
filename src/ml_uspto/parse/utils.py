@@ -1,9 +1,4 @@
-"""Shared utilities for the parse subpackage.
-
-Cross-module helpers that don't fit any single parse module — date
-coercion today, more as the subpackage grows. Things scoped to one
-module belong in that module, not here.
-"""
+"""Shared utilities for the parse subpackage."""
 
 from __future__ import annotations
 

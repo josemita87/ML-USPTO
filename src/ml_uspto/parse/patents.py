@@ -1,24 +1,4 @@
-"""Raw `/applications/{appNum}` payload → flat per-app record.
-
-The parse layer's contract for the patents surface: take the raw API
-payload (either the bare wrapper record or the `patentFileWrapperDataBag`
-envelope) and produce one flat dict per app, ready to land in
-`patents.parquet`. The dict carries scalar metadata plus parallel-array
-columns for the nested bags (events, assignments, parent continuity,
-CPC classifications), preserving per-assignment grouping for assignees.
-
-Downstream:
-  - `parse.joiner` does pure dataframe joins; patent columns ride along
-    onto the joined frame.
-  - `features.transforms.build_features` consumes those columns from
-    each joined row and applies T₀ leakage filtering + aggregation in
-    pure pandas. No raw-cache reads after parse.
-
-The flatten engine in `parse.flatten` is unused for this surface — the
-nested-bag extraction is too varied to express declaratively. We keep
-`parse_patent_wrapper` (raw → typed Pydantic) for the per-app validation
-contract; `to_flat_record` builds the parquet row from the same payload.
-"""
+"""Raw `/applications/{appNum}` payload → flat per-app record."""
 
 from __future__ import annotations
 
@@ -42,6 +22,12 @@ def _normalize_cpc_classifications(record: Mapping[str, Any]) -> list[str]:
     Entries are inconsistently typed across the corpus: sometimes
     `list[str]`, sometimes `list[dict]`, sometimes a single non-list
     value. This function flattens all variants.
+
+    Args:
+        record: Unwrapped patent file-wrapper record.
+
+    Returns:
+        Flat list of CPC code strings.
     """
     app_meta = record.get("applicationMetaData") or {}
     if not isinstance(app_meta, Mapping):
@@ -61,7 +47,13 @@ def _normalize_cpc_classifications(record: Mapping[str, Any]) -> list[str]:
 
 
 def parse_patent_wrapper(payload: Mapping[str, Any]) -> PatentFileWrapper:
-    """Construct a typed `PatentFileWrapper` from a raw API payload."""
+    """Construct a typed `PatentFileWrapper` from a raw API payload.
+
+    Accepts either the bare wrapper record or the
+    `patentFileWrapperDataBag` envelope. Used as the per-app
+    validation contract; flatten via `to_flat_record` for the parquet
+    row.
+    """
     record = _unwrap_record(payload)
     return PatentFileWrapper.model_validate(
         {**record, "cpc_classifications": _normalize_cpc_classifications(record)}
@@ -109,9 +101,15 @@ def to_flat_record(payload: Mapping[str, Any]) -> dict[str, Any]:
     and `assignees_per_assignment` as `list[list[str]]` to preserve
     which assignees belong to which assignment.
 
-    `grant_date` intentionally absent — proceedings already carries it
-    via `patentOwnerData.grantDate`. Including it here would collide
-    on the joiner's left-join (pandas would suffix to `_x`/`_y`).
+    Args:
+        payload: Raw `/applications/{appNum}` response (bare record
+            or `patentFileWrapperDataBag` envelope).
+
+    Returns:
+        Flat dict, one row per app. `grant_date` is intentionally
+        absent — proceedings already carries it via
+        `patentOwnerData.grantDate`, and including it here would
+        collide on the joiner's left-join.
     """
     record = _unwrap_record(payload)
     wrapper = PatentFileWrapper.model_validate(

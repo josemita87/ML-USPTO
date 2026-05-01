@@ -1,20 +1,4 @@
-"""FWD decision-record walking + cache-gap detection.
-
-`enumerate_missing_fwd_pdfs(...)` walks the raw `Stage.DECISIONS` JSON
-cache and returns the candidate rows whose `cancelled` label is
-unresolvable by status + title, so a not-yet-cached FWD text blob is
-the only label source. Used by `drivers/run_ingest_decision_texts.py`.
-
-Lives in `ingest/` rather than `parse/` because it doesn't parse — it
-derives a next-fetch work list from current cache state. It consults
-`parse.labels.extract_outcome` to decide title-resolvability, but the
-output is a candidate frame for the fetcher, not parsed records.
-
-Per `docs/scope/prediction_scope.md` §3.1, this is restricted to
-*original* FWDs — on-remand and rehearing variants reference the
-remanded subset rather than the originally-challenged set, and would
-yield wrong labels.
-"""
+"""FWD decision-record walking + cache-gap detection."""
 
 from __future__ import annotations
 
@@ -41,9 +25,14 @@ def _iter_fwd_decisions(storage: Storage):
     """Yield FWD-original raw decision records.
 
     Reads `Stage.DECISIONS` raw JSON pages directly. The flattened
-    `Frame.DECISIONS` parquet drops `documentData.fileDownloadURI` (no
-    feature consumes it), but the gap-detector needs the URI to hand to
-    the fetch driver, so we walk the raw cache.
+    `Frame.DECISIONS` parquet drops `documentData.fileDownloadURI`
+    (no feature consumes it), but the gap-detector needs the URI to
+    hand to the fetch driver, so we walk the raw cache.
+
+    Restricted to *original* FWDs per
+    `docs/scope/prediction_scope.md` §3.1 — on-remand and rehearing
+    variants reference the remanded subset rather than the
+    originally-challenged set, and would yield wrong labels.
     """
     fwd_marker = FWD_DECISION_TYPE_MARKER.lower()
     orig_marker = FWD_ORIGINAL_MARKER.lower()
@@ -75,15 +64,27 @@ def enumerate_missing_fwd_pdfs(
 ) -> pd.DataFrame:
     """Return candidate rows whose label requires a not-yet-cached FWD text blob.
 
-    Exclusion layers, applied in order:
-      1. Non-IPR trials (we predict on IPR only).
-      2. trial_status ∈ NON_FWD_LABEL_{0,1}_STATUSES — already 0/1.
-      3. extract_outcome(document_title) is not None — title-resolvable.
-      4. Text already cached at `Stage.DECISION_TEXTS / <doc_id>.txt`.
+    Used by `drivers/run_ingest_decision_texts.py` to derive the next
+    fetch work list from current cache state. A permanently-broken PDF
+    will reappear on every cron cycle; at weekly-delta scale (~30–50
+    candidates) that's negligible against the 1.2M/wk PDF bucket, so
+    we don't track failures.
 
-    A permanently-broken PDF will reappear on every cron cycle; at
-    weekly-delta scale (~30–50 candidates) that's negligible against the
-    1.2M/wk PDF bucket, so we don't track failures.
+    Args:
+        storage: Backend over the raw `Stage.DECISIONS` cache and the
+            `Stage.DECISION_TEXTS` blob store.
+        trials: Flattened trials frame (used to filter by trial type
+            and status).
+
+    Returns:
+        Candidate frame with one row per unresolvable, not-yet-cached
+        FWD. Exclusions applied in order:
+          1. Non-IPR trials (we predict on IPR only).
+          2. `trial_status ∈ NON_FWD_LABEL_{0,1}_STATUSES` (already 0/1).
+          3. `extract_outcome(document_title) is not None`
+             (title-resolvable).
+          4. Text already cached at
+             `Stage.DECISION_TEXTS / <doc_id>.txt`.
     """
     cols = [c.value for c in Col]
     candidates = pd.DataFrame(list(_iter_fwd_decisions(storage)), columns=cols)

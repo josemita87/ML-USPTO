@@ -1,10 +1,4 @@
-"""Model-agnostic parser engine.
-
-Reads a YAML mapping (`{output_column: dotted.path.into.record}`) and
-flattens a list of nested JSON records into a flat DataFrame. New API
-surfaces are added by appending a key to `config/parsers/patents.yaml`
-and a member to `Parser`, not by writing more `_flatten_*` functions.
-"""
+"""Model-agnostic parser engine."""
 
 from __future__ import annotations
 
@@ -26,7 +20,7 @@ def _load_all() -> dict[str, Any]:
 
 
 def load_parser_config(parser: Parser) -> dict[str, Any]:
-    """Return the column-mapping dict for a single surface."""
+    """Return the column-mapping dict for a single API surface from YAML."""
     return _load_all()[parser.value]
 
 
@@ -41,14 +35,23 @@ def _get_path(obj: Any, path: str) -> Any:
 def flatten_records(
     records: Iterable[Mapping[str, Any]], config: Mapping[str, Any]
 ) -> pd.DataFrame:
-    """Apply a YAML column-mapping to each record and return a flat DataFrame."""
+    """Apply a YAML column-mapping (`{output_column: dotted.path}`) to each record.
+
+    Args:
+        records: Iterable of nested JSON records.
+        config: Parser config dict with a `columns` key mapping output
+            column names to dotted paths into the record.
+
+    Returns:
+        Flat DataFrame in the column order declared by `config`.
+    """
     columns: dict[str, str] = config["columns"]
     rows = [{col: _get_path(rec, path) for col, path in columns.items()} for rec in records]
     return pd.DataFrame(rows, columns=list(columns))
 
 
 def flatten(records: Iterable[Mapping[str, Any]], parser: Parser) -> pd.DataFrame:
-    """Convenience: load the parser config for `parser` and flatten in one call."""
+    """Load the parser config for `parser` and flatten `records` in one call."""
     return flatten_records(records, load_parser_config(parser))
 
 

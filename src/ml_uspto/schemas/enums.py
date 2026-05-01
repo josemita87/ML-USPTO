@@ -1,10 +1,4 @@
-"""String enums for known categorical values in USPTO ODP payloads.
-
-Use sparingly — pydantic models keep these fields as `str | None` to stay
-tolerant of new values appearing upstream. Consume the enums where the code
-*decides* on a known value (e.g. label construction), not where it merely
-passes one through.
-"""
+"""String enums for known categorical values in USPTO ODP payloads."""
 
 from enum import StrEnum
 

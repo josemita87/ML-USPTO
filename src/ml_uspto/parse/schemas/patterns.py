@@ -1,11 +1,4 @@
-"""Compiled regex patterns for `ml_uspto.parse`.
-
-The patterns are sourced from `config/petition_picker.yaml`.
-
-Separated from `parse.schemas.constants` per the CLAUDE.md "regex separate
-from non-regex" convention. Non-regex values (paper-number ceiling, exhibit
-categories, sample-titles limit) stay in `parse.schemas.constants`.
-"""
+"""Compiled regex patterns for `ml_uspto.parse` (sourced from `config/petition_picker.yaml`)."""
 
 import re
 from functools import lru_cache

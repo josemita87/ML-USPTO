@@ -1,25 +1,4 @@
-"""Stage 4 — join trials ⨝ decisions ⨝ petitions ⨝ patents + label.
-
-Pure structural post-processing: reads the four parquets, runs
-`parse.labels.build_labels` to derive the `cancelled` label, and emits
-one row per labeled trial that has a petition row and a patent record.
-
-Patent feature engineering — T₀ leakage filtering, count aggregation,
-span computation, transforms — happens entirely downstream in
-`features.transforms.build_features`. The joined frame just carries the
-patent parallel-array columns (`event_codes`, `event_dates`,
-`assignment_received_dates`, `assignees_per_assignment`, …) along for
-the features driver to consume.
-
-Notes:
-  - T₀ cross-check: each merged row carries both `petition_filing_date`
-    (proceedings) and `petition_filing_date_doc` (documents). Mismatches
-    are logged once per trial and counted on `JoinReport`; proceedings
-    wins for all downstream filtering.
-  - Patent merge is left-join: trials that had a fetch failure (no
-    patents row) carry NaN for every patent column. The features stage
-    handles missingness via regime indicators.
-"""
+"""Join trials ⨝ decisions ⨝ petitions ⨝ patents and attach the label."""
 
 from __future__ import annotations
 
@@ -35,10 +14,10 @@ logger = logging.getLogger(__name__)
 
 
 def _column_to_dates(series: pd.Series) -> pd.Series:
-    """Coerce a column to `datetime.date | None` once, vectorized.
+    """Vectorized coercion of a column to `datetime.date | None`.
 
-    Handles columns typed as `datetime64[ns]`, `object` carrying `date`,
-    or strings.
+    Handles columns typed as `datetime64[ns]`, `object` carrying
+    `date`, or strings.
     """
     coerced = pd.to_datetime(series, errors="coerce")
     return coerced.dt.date.where(coerced.notna(), None)
@@ -54,7 +33,12 @@ def join_all(
 ) -> tuple[pd.DataFrame, JoinReport]:
     """Build the labeled, petitioned, patent-attached trial frame.
 
-    All inputs are loaded by the caller (`drivers/run_join.py`).
+    Pure structural post-processing — patent feature engineering (T₀
+    leakage filtering, count aggregation, transforms) happens entirely
+    downstream in `features.transforms.build_features`. The joined
+    frame just carries the patent parallel-array columns
+    (`event_codes`, `event_dates`, `assignment_received_dates`,
+    `assignees_per_assignment`, …) along for the features stage.
 
     Steps:
       1. `build_labels(trials, decisions)` → labeled trials with
@@ -64,11 +48,26 @@ def join_all(
       3. Inner-join with `petitions` on `trial_number`. Labeled trials
          without a petition row drop out implicitly.
       4. Cross-check `petition_filing_date` (proceedings) against
-         `petition_filing_date_doc` (documents) on each merged row;
-         proceedings wins.
+         `petition_filing_date_doc` (documents) on each merged row.
+         Mismatches are logged per trial and counted on `JoinReport`;
+         proceedings wins for all downstream filtering.
       5. Left-join with `patents` on `application_number`. Trials whose
-         patent fetch failed carry NaN for every patent column —
-         features stage flags via `patent_features_missing` regime.
+         patent fetch failed carry NaN for every patent column — the
+         features stage flags those rows via the
+         `patent_features_missing` regime indicator.
+
+    Args:
+        storage: Backend forwarded to `build_labels` for the cached
+            FWD-text label fallback.
+        trials: Flattened proceedings frame.
+        decisions: Flattened decisions frame.
+        petitions: Frame of `Petition` rows from
+            `parse.petitions.assemble_petitions`.
+        patents: Flattened patent file-wrapper frame.
+
+    Returns:
+        Tuple of (joined frame, `JoinReport`) describing input/output
+        cardinalities and the T₀-mismatch count.
     """
     n_trials_input = len(trials)
     labeled = build_labels(trials, decisions, storage=storage)

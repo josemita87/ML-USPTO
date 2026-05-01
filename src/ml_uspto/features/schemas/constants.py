@@ -1,16 +1,4 @@
-"""Subpackage-local constants for `ml_uspto.features`.
-
-Two groups:
-  - Mechanical column lists for `transforms.build_features` —
-    `PATENT_COUNT_FEATURES` (NaN ⇒ no wrapper, fill 0) and
-    `PATENT_NULLABLE_NUMERIC` (NaN carries meaning, paired indicator).
-  - Patent event-code taxonomy used by the T₀-leakage filter inside
-    `transforms.build_features`: `EVENT_CODE_CATEGORIES` (code →
-    category map), `TRIAL_EVENT_PREFIXES` (codes that are TRIAL by
-    prefix, e.g. `TRIALPET`/`TRIALFWD`), `BANNED_EVENT_CATEGORIES`
-    (categories filtered out at T₀ because they leak label
-    information). All loaded from `config/patents/event_codes.yaml`.
-"""
+"""Subpackage-local constants for `ml_uspto.features`."""
 
 from functools import lru_cache
 
@@ -51,6 +39,26 @@ PATENT_NULLABLE_NUMERIC: tuple[str, ...] = (
     "days_grant_to_petition",
 )
 
+# Raw categoricals passed through `transforms.build_features` unencoded.
+# Encoding (one-hot / frequency) lives in the modeling-side preprocessor
+# so it is fit on training rows only — see
+# `ml_uspto.models.preprocessing.build_preprocessor`.
+#
+# OHE: closed taxonomies — TC has 17 stable USPTO codes, CPC section is
+# the 9 single-letter classes + nan. `handle_unknown="ignore"` keeps the
+# column set frozen at train fit time.
+OHE_CATEGORICAL_COLUMNS: tuple[str, ...] = (
+    "technology_center",
+    "cpc_section",
+)
+
+# Frequency: open-vocabulary party identifiers. Counts must be learned
+# on train rows only — refit per CV fold via the Pipeline.
+FREQUENCY_CATEGORICAL_COLUMNS: tuple[str, ...] = (
+    "petitioner_real_party",
+    "owner_real_party",
+)
+
 
 @lru_cache(maxsize=1)
 def _load_patent_event_codes() -> dict:
@@ -72,6 +80,8 @@ TRIAL_EVENT_PREFIXES: tuple[str, ...] = tuple(_event_cfg.get("banned_prefixes", 
 __all__ = [
     "PATENT_COUNT_FEATURES",
     "PATENT_NULLABLE_NUMERIC",
+    "OHE_CATEGORICAL_COLUMNS",
+    "FREQUENCY_CATEGORICAL_COLUMNS",
     "EVENT_CODE_CATEGORIES",
     "BANNED_EVENT_CATEGORIES",
     "TRIAL_EVENT_PREFIXES",

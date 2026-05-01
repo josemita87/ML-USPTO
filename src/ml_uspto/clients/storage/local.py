@@ -1,14 +1,4 @@
-"""Local filesystem storage backend.
-
-Implements `storage.Storage` against the local FS, with two roots:
-
-  - `processed_root` for `Frame` parquets — `<root>/<frame>.parquet`
-  - `raw_root` for object buckets — `<root>/<bucket>/<key>.json`
-
-The split mirrors the project's data layout (raw cache vs processed
-outputs). An S3 backend can collapse both into a single bucket with
-prefixes; the Protocol contract is the same.
-"""
+"""Local filesystem storage backend."""
 
 from __future__ import annotations
 
@@ -35,9 +25,16 @@ def _json_default(obj: Any) -> str:
 class LocalStorage:
     """Default backend — reads/writes under the project's local data dirs.
 
+    Implements `storage.Storage` against the local filesystem with two
+    roots: `processed_root` for `Frame` parquets
+    (`<root>/<frame>.parquet`) and `raw_root` for JSON object buckets
+    (`<root>/<bucket>/<key>.json`). The split mirrors the project's
+    data layout (raw cache vs processed outputs). An S3 backend can
+    collapse both into a single bucket with prefixes.
+
     `raw_root` and `processed_root` default to `paths.raw_dir()` and
-    `paths.processed_dir()` (settings-driven). Tests pass `tmp_path`-rooted
-    instances to isolate I/O.
+    `paths.processed_dir()` (settings-driven). Tests pass
+    `tmp_path`-rooted instances to isolate I/O.
     """
 
     def __init__(

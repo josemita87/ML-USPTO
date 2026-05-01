@@ -1,9 +1,4 @@
-"""Ingest-local enums.
-
-`Stage` enumerates the directories `ingest.cache` writes under
-`<data.raw_dir>/<stage>/`. Same key shape will map 1:1 to S3 when the
-backend swaps (`s3://<bucket>/raw/<stage>/<key>.json`).
-"""
+"""Ingest-local enums."""
 
 from enum import StrEnum
 

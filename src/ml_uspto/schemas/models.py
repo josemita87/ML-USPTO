@@ -1,9 +1,4 @@
-"""All Pydantic models for the project, in one place.
-
-Field names mirror the camelCase API payload via Pydantic aliases so models
-populate either from raw JSON (`Proceeding.model_validate(payload)`) or from
-snake_case kwargs (`Proceeding(trial_number=...)`).
-"""
+"""All Pydantic models for the project, in one place."""
 
 import re
 from datetime import date, datetime
@@ -115,10 +110,17 @@ class TrialDocument(BaseModel):
 
 
 class FeatureRow(BaseModel):
-    """Mirrors the columns produced by `ml_uspto.features.transforms.build_features`.
+    """Mirrors the leakage-free intermediate frame produced by
+    `ml_uspto.features.transforms.build_features`.
 
-    Both training and inference paths construct `FeatureRow` instances; this is
-    the single shared codepath that prevents training/serving skew.
+    Cross-row encodings (one-hot, frequency, imputation) are *not*
+    fields here — they are applied downstream by
+    `ml_uspto.models.preprocessing.build_preprocessor` so they can be
+    fit on training rows only.
+
+    Both training and inference paths construct `FeatureRow` instances;
+    this is the single shared codepath that prevents training/serving
+    skew on the per-row transforms.
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -128,17 +130,21 @@ class FeatureRow(BaseModel):
     filing_year: int | None = None
     filing_month: int | None = None
     filing_dayofweek: int | None = None
-    days_grant_to_petition: int | None = None
-
-    petitioner_frequency: int | None = None
-    owner_frequency: int | None = None
-
     art_unit_group: int | None = None
-    technology_center: str | None = None
 
-    # Variable-width one-hot for technology_center; persisted as a dict so the
-    # contract is stable across training runs even when new TCs appear.
-    tech_center_onehot: dict[str, int] = Field(default_factory=dict)
+    days_grant_to_petition: int | None = None
+    days_grant_to_petition_missing: int | None = None
+    prosecution_span_days: int | None = None
+    prosecution_span_days_missing: int | None = None
+    days_since_last_assignment: int | None = None
+    no_recorded_assignment: int | None = None
+    patent_features_missing: int | None = None
+
+    # Raw categoricals — encoded downstream by the modeling preprocessor.
+    technology_center: str | None = None
+    cpc_section: str | None = None
+    petitioner_real_party: str | None = None
+    owner_real_party: str | None = None
 
 
 # ---------------------------------------------------------------------------

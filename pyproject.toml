@@ -19,7 +19,6 @@ dependencies = [
 # container image builds with `uv sync --no-dev` and skips this group.
 ml = [
     "scikit-learn>=1.4",
-    "xgboost>=2.0",
     "matplotlib>=3.8",
     "seaborn>=0.13",
 ]

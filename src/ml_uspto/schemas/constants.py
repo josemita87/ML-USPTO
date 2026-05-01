@@ -1,10 +1,4 @@
-"""Project-wide constants, sourced from `config/labels.yaml`.
-
-Keeping the taxonomies in YAML lets a domain expert revise the §3 rules of
-`docs/scope/prediction_scope.md` without touching Python. Consumers import
-the frozensets/strings here so there is exactly one Python entry point.
-Compiled regex patterns live in `schemas.patterns`, not here.
-"""
+"""Project-wide constants, sourced from `config/labels.yaml`."""
 
 from functools import lru_cache
 

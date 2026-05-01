@@ -1,47 +1,4 @@
-"""Build the binary `cancelled` label per `docs/scope/prediction_scope.md` §3.
-
-Target = 1 iff the trial's *original* Final Written Decision held all
-challenged claims unpatentable. Everything else (institution denied,
-discretionary denial, settled, procedurally terminated, FWD where any claim
-survived) is 0. Trials still pending are excluded — no terminal outcome,
-nothing to label.
-
-Per `prediction_scope.md` §3.1, only the original FWD is used as a label
-source; on-remand and rehearing variants are dropped at this stage. See
-the doc for the rationale and the trade-off (~5% of FWD trials have
-amendments; expected label noise ≪1%).
-
-Status/outcome taxonomies live in `config/labels.yaml` and are exposed via
-`ml_uspto.schemas.constants` so they can be revised without code changes.
-
-Label resolution layers, applied in order — each only fills rows the
-previous layer left unresolved:
-  1. **Status-based.** `trial_status ∈ NON_FWD_LABEL_{0,1}_STATUSES` →
-     direct 0/1 (covers Institution Denied, Settled, Adverse Judgment, …).
-  2. **`document_title` regex.** ~41% of original FWDs encode the
-     granular ruling directly in the API-returned title text
-     ("Determining All Challenged Claims Unpatentable"); `extract_outcome`
-     applies the FWD outcome regex to the title.
-  3. **Cached FWD-text fallback.** For trials still unresolved, load the
-     cached FWD text blob (`Stage.DECISION_TEXTS / <document_identifier>.txt`,
-     produced at fetch-time from the PDF) and run the same regex. Skipped
-     silently when `storage=None` (unit-test mode) or when the text isn't
-     cached. Backfilling the remaining FWD texts requires
-     `drivers/run_ingest_decision_texts.py` to widen the download set.
-
-The empirical sentinel layer (matching `decisionData.trialOutcomeCategory`
-against `ALL_CLAIMS_UNPATENTABLE_OUTCOMES`) was removed in 2026-04 after
-zero matches in the 2,180-row cold-run; if USPTO ever populates that
-field, re-add it before layer 2 with one frozenset lookup.
-
-Scope: this module builds *labels only*. It does not coerce dates,
-filter on `petition_filing_date`/`patent_number`, or normalize feature
-columns — those are joiner/feature-pipeline concerns. The IPR-only
-filter is enforced server-side by `fetch_proceedings`, so we trust
-upstream rather than re-filter here. Trials whose label is unresolvable
-after all three layers are dropped; everything else flows through to
-`parse.joiner` with a fully-labeled `cancelled` int column.
-"""
+"""Build the binary `cancelled` label per `docs/scope/prediction_scope.md` §3."""
 
 from __future__ import annotations
 
@@ -67,16 +24,19 @@ logger = logging.getLogger(__name__)
 def extract_outcome(text: str) -> int | None:
     """Return the binary `cancelled` label from FWD title or opinion text.
 
-    Inspects the first `FWD_PDF_COVER_PAGE_SEARCH_CHARS` of `text` and
-    runs `FWD_PDF_OUTCOME_PATTERNS` in order; returns the first match's
-    label. Returns `None` if no pattern matches — caller's choice whether
-    to drop, quarantine, or fall back (image-scan PDFs, Motion-to-Amend
-    rulings without a "Determining" cover line, malformed text).
+    Inspects only the first `FWD_PDF_COVER_PAGE_SEARCH_CHARS` of `text`
+    and runs `FWD_PDF_OUTCOME_PATTERNS` in order. The head-window cap is
+    a correctness guard — it stops a stray "Determining …" inside a
+    citation deeper in the opinion from overriding the cover-page ruling.
 
-    The head-window cap is a *correctness* guard — it stops a stray
-    "Determining …" inside a citation deeper in the opinion from
-    overriding the cover-page ruling. Same window applies to titles
-    (which are far shorter than the window) and to full opinion text.
+    Args:
+        text: FWD title text or full opinion text.
+
+    Returns:
+        First matching pattern's label, or `None` when no pattern hits
+        (image-scan PDFs, Motion-to-Amend rulings without a "Determining"
+        cover line, malformed text). Caller chooses whether to drop,
+        quarantine, or fall back.
     """
     head = text[:FWD_PDF_COVER_PAGE_SEARCH_CHARS]
     for entry in FWD_PDF_OUTCOME_PATTERNS:
@@ -88,17 +48,20 @@ def extract_outcome(text: str) -> int | None:
 def _identify_terminating_fwd(decisions: pd.DataFrame) -> pd.DataFrame:
     """Return one row per trial with terminating-FWD metadata.
 
-    The output carries fields needed for label resolution:
-    `terminating_outcome`, `document_title`, and `document_identifier`
-    for text-blob lookup.
-
     Filters to *original* FWDs only — `documentTypeDescriptionText`
-    matching both `FWD_DECISION_TYPE_MARKER` ("Final Written Decision",
-    case-insensitive) and `FWD_ORIGINAL_MARKER` ("original"). On-remand,
-    rehearing, and Director-remand variants are dropped per
-    `docs/scope/prediction_scope.md` §3.1: their cover-page outcomes
+    matching both `FWD_DECISION_TYPE_MARKER` and `FWD_ORIGINAL_MARKER`.
+    On-remand, rehearing, and Director-remand variants are dropped per
+    `docs/scope/prediction_scope.md` §3.1 (their cover-page outcomes
     refer to the remanded/rehearing subset, not the originally-challenged
-    set, so they're not valid label sources.
+    set, so they're not valid label sources).
+
+    Args:
+        decisions: Flattened decisions frame from `Frame.DECISIONS`.
+
+    Returns:
+        Frame with columns `trial_number`, `terminating_outcome`,
+        `document_title`, `document_identifier` — the fields the label
+        cascade and text-blob lookup need.
     """
     out_cols = ["trial_number", "terminating_outcome", "document_title", "document_identifier"]
     empty = pd.DataFrame({c: [] for c in out_cols})
@@ -149,15 +112,30 @@ def build_labels(
 ) -> pd.DataFrame:
     """Attach a `cancelled` int column to `proceedings`, drop unlabelable rows.
 
-    Returns one row per labeled trial — same columns as `proceedings` plus
-    the FWD metadata merged in (`terminating_outcome`, `document_title`,
-    `document_identifier`) plus the `cancelled` int. Rows are dropped iff:
-      - status ∈ PENDING_STATUSES (no terminal outcome), or
-      - the three-layer cascade fails to resolve the label.
+    Resolves the label in three layers, each filling rows the previous
+    layer left unresolved:
+      1. Status-based — `trial_status ∈ NON_FWD_LABEL_{0,1}_STATUSES`
+         maps directly to 0/1 (Institution Denied, Settled, Adverse
+         Judgment, …).
+      2. `document_title` regex — ~41% of original FWDs encode the
+         granular ruling in the API-returned title text.
+      3. Cached FWD-text fallback — load
+         `Stage.DECISION_TEXTS / <document_identifier>.txt` (produced
+         at fetch-time from the PDF) and run the same regex. Skipped
+         when `storage=None` or the text isn't cached.
 
-    When `storage` is given, the cached-text fallback runs against
-    `Stage.DECISION_TEXTS`; when None, only status + title extraction
-    are attempted.
+    Args:
+        proceedings: Flattened proceedings frame from `Frame.TRIALS`.
+        decisions: Flattened decisions frame from `Frame.DECISIONS`.
+        storage: Backend for the cached FWD-text fallback. When `None`,
+            layers 1–2 still run; layer 3 is skipped silently.
+
+    Returns:
+        One row per labeled trial — original `proceedings` columns plus
+        the merged FWD metadata (`terminating_outcome`, `document_title`,
+        `document_identifier`) plus the `cancelled` int. Rows in
+        `PENDING_STATUSES` and rows the cascade cannot resolve are
+        dropped.
     """
     logger.info("Raw proceedings: %d", len(proceedings))
 

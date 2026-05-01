@@ -1,8 +1,4 @@
-"""Application settings loaded from .env + config/settings.yaml via pydantic-settings.
-
-Filesystem locations are owned by `ml_uspto.paths` — this module only
-defines configurable values (API keys, page sizes, data dir names).
-"""
+"""Application settings loaded from .env + config/settings.yaml via pydantic-settings."""
 
 from functools import lru_cache
 from pathlib import Path

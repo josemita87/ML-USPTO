@@ -1,9 +1,4 @@
-"""Project-wide compiled regex patterns, sourced from `config/labels.yaml`.
-
-Separated from `schemas.constants` so the regex spec, its compile flags, and
-its match contract live in one place. Constants that aren't regex stay in
-`schemas.constants`; the `FwdOutcomePattern` type lives in `schemas.models`.
-"""
+"""Project-wide compiled regex patterns, sourced from `config/labels.yaml`."""
 
 import re
 from functools import lru_cache

@@ -1,26 +1,4 @@
-"""Ingestion fetchers — paginate/search, cache, flatten.
-
-Two entrypoints, one shared paginator. Pages and per-app payloads are
-cached object-by-object through the injected `Storage` backend
-(`storage.Storage`), so a re-run after Ctrl-C resumes from the
-last cached object without re-issuing requests. `LocalStorage` puts
-them under `data/raw/<bucket>/<key>.json`; an S3 backend uses the same
-`(bucket, key)` shape against `s3://...`.
-
-  - `fetch_proceedings(storage, client)` → POST `/trials/proceedings/search`
-    filtered to `trialTypeCode = "IPR"`, flattened with
-    `Parser.PROCEEDINGS`, saved as the `Frame.TRIALS` frame.
-  - `fetch_petitions(storage, client)` → POST `/trials/documents/search`
-    filtered to `documentData.documentCategory IN PETITION_SCAN_CATEGORIES`
-    (set in `config/petition_picker.yaml` — currently PETITION + Paper per
-    `docs/api/proceedings.md` "Petition coverage and the category-taxonomy
-    drift"). Yields raw records lazily so the assembler streams without
-    holding the full ~323K-row corpus in memory.
-  - `fetch_patents(storage, client, application_numbers)` → POST
-    `/applications/search` in application-number batches, cache each
-    returned wrapper under bucket `Stage.PATENTS`, and yield per-app
-    success/quarantine outcomes.
-"""
+"""Ingestion fetchers — paginate/search, cache, flatten."""
 
 from __future__ import annotations
 
@@ -62,13 +40,23 @@ def _paginate_cached(
 
     Every `USPTOClient.search_*_post` shares the
     `(filters, offset, limit) -> dict` signature, so we bind the surface
-    here. The full payload is cached (not just the records) so `count`
-    survives resumes. The records-bag key is looked up from `bucket`
-    via `STAGE_RECORDS_KEY` — callers don't pass it.
+    here. The full payload is cached (not just the records) so the
+    `count` field survives resumes. The records-bag key is looked up
+    from `bucket` via `STAGE_RECORDS_KEY` — callers don't pass it.
 
-    `max_pages` caps the loop for smoke runs; the cap stops the loop
-    *before* fetching, so already-cached pages past the cap are not
-    consumed even though they exist on disk.
+    Args:
+        storage: Backend for the on-disk page cache.
+        client_method: Bound `USPTOClient.search_*_post` method.
+        filters: Forwarded to `client_method` verbatim.
+        bucket: Stage whose pages are being fetched (also the cache
+            bucket).
+        page_size: Records per page.
+        max_pages: Optional cap for smoke runs. The cap stops the loop
+            *before* fetching, so already-cached pages past the cap
+            are not consumed even though they exist on disk.
+
+    Yields:
+        Records from successive pages.
     """
     records_key = STAGE_RECORDS_KEY[bucket]
     pages_done = 0
@@ -113,8 +101,18 @@ def fetch_proceedings(
 
     Filters via POST on `trialMetaData.trialTypeCode = "IPR"`. The
     flattened columns come from `Parser.PROCEEDINGS` in
-    `config/parsers/patents.yaml`. Caller passes `page_size` explicitly
-    (typically `get_settings().api.page_size`) — no in-function defaults.
+    `config/parsers/patents.yaml`.
+
+    Args:
+        storage: Page-cache + processed-frame backend.
+        client: USPTO ODP client.
+        page_size: Records per page (typically
+            `get_settings().api.page_size` — no in-function default).
+        max_pages: Optional cap for smoke runs.
+
+    Returns:
+        The flattened proceedings frame, also persisted as
+        `Frame.TRIALS`.
     """
     records = _paginate_cached(
         storage,
@@ -139,11 +137,18 @@ def fetch_decisions(
 ) -> pd.DataFrame:
     """Fetch all IPR decisions, flatten, and save `Frame.DECISIONS`.
 
-    Filters via POST on `trialMetaData.trialTypeCode = "IPR"`. Same paginator
-    + cache plumbing as `fetch_proceedings`; pages cached under bucket
-    `Stage.DECISIONS`. Required to derive the `cancelled` label for trials
-    with `Final Written Decision` status — `parse.labels` looks up the
-    terminating FWD's `trialOutcomeCategory` per trial.
+    Required to derive the `cancelled` label for trials with `Final
+    Written Decision` status — `parse.labels` looks up the terminating
+    FWD's `trialOutcomeCategory` per trial.
+
+    Args:
+        storage: Page-cache + processed-frame backend.
+        client: USPTO ODP client.
+        page_size: Records per page.
+        max_pages: Optional cap for smoke runs.
+
+    Returns:
+        The flattened decisions frame, persisted as `Frame.DECISIONS`.
     """
     records = list(
         _paginate_cached(
@@ -173,13 +178,20 @@ def fetch_petitions(
     Filter is `documentData.documentCategory IN PETITION_SCAN_CATEGORIES`
     (currently PETITION + Paper per `config/petition_picker.yaml` and
     `docs/api/proceedings.md`); both buckets must be scanned because
-    pre-2022 petitions live in the `Paper` catch-all. The `OTHER` bucket
-    is intentionally excluded — see the YAML comment for the empirical
-    rationale. Records are cached page-by-page under
-    `data/raw/documents_petition_scan/`. The iterator is single-pass
-    (one page resident at a time); pass it directly to
-    `parse.petitions.assemble_petitions` to avoid materializing
-    all ~323K records.
+    pre-2022 petitions live in the `Paper` catch-all.
+
+    The iterator is single-pass (one page resident at a time); pass it
+    directly to `parse.petitions.assemble_petitions` to avoid
+    materializing all ~323K records.
+
+    Args:
+        storage: Page-cache backend.
+        client: USPTO ODP client.
+        page_size: Records per page.
+        max_pages: Optional cap for smoke runs.
+
+    Yields:
+        Raw document records.
     """
     return _paginate_cached(
         storage,
@@ -279,11 +291,26 @@ def fetch_patents(
 ) -> Iterator[PatentFetchResult]:
     """Fetch application file wrappers by application number with per-app caching.
 
-    Uncached applications are fetched in batches through `/applications/search`
-    filtered by `applicationNumberText`. Successes cache one raw wrapper payload
-    under bucket `Stage.PATENTS`, key=application_number; missing applications
-    and request failures cache explicit fetch-error payloads so reruns do not
-    repeatedly hit known-missing apps.
+    Uncached applications are fetched in batches through
+    `/applications/search` filtered by `applicationNumberText`.
+    Successes cache one raw wrapper payload under bucket
+    `Stage.PATENTS`, keyed by `application_number`. Missing applications
+    and request failures cache explicit fetch-error payloads so reruns
+    do not repeatedly hit known-missing apps.
+
+    Args:
+        storage: Page-cache backend.
+        client: USPTO ODP client.
+        application_numbers: Application numbers to fetch (deduped
+            internally).
+        page_size: Batch size for `/applications/search`.
+        max_apps: Optional cap on the number of distinct applications.
+
+    Yields:
+        One `PatentFetchResult` per requested application.
+
+    Raises:
+        ValueError: If `page_size` is not positive.
     """
     apps: list[str] = []
     seen: set[str] = set()
@@ -332,23 +359,27 @@ def fetch_decision_pdfs(
     *,
     rate_sleep: float = 2.0,
 ) -> Iterator[DecisionPdfFetchResult]:
-    """Download each candidate FWD PDF.
+    """Download each candidate FWD PDF, extract text, cache, yield outcomes.
 
-    Extract text, save under `Stage.DECISION_TEXTS`, and yield one outcome
-    per row.
+    Successful downloads run pdfplumber over the PDF bytes and land the
+    full opinion text at `Stage.DECISION_TEXTS / <doc_id>.txt`; the
+    binary is never persisted. Failures are logged and yield a result
+    with `bytes_written=None`; the next cron's gap-detector will pick
+    the same doc up again.
 
-    `candidates` is the frame returned by
-    `ingest.decisions.enumerate_missing_fwd_pdfs` — already filtered for
-    cache hits, so every row is a fresh attempt. Successful downloads
-    run pdfplumber over the PDF bytes and land the full opinion text at
-    `Stage.DECISION_TEXTS / <doc_id>.txt`; the binary is never persisted.
-    Failures are logged and yield a result with `bytes_written=None`;
-    the next cron's gap-detector will pick the same doc up again.
+    Args:
+        storage: Backend for cached opinion-text blobs.
+        client: USPTO ODP client.
+        candidates: Frame returned by
+            `ingest.decisions.enumerate_missing_fwd_pdfs` — already
+            filtered for cache hits, so every row is a fresh attempt.
+        rate_sleep: Fixed inter-request pause to stay well under the
+            PDF-bucket budget (~1.2M requests/week — much tighter than
+            metadata). The 429 backoff inside `USPTOClient.download_pdf`
+            handles bursts; this sleep keeps the average rate down.
 
-    `rate_sleep` is a fixed inter-request pause to stay well under the
-    PDF-bucket budget (~1.2M requests/week — much tighter than metadata).
-    The 429 backoff inside `USPTOClient.download_pdf` handles bursts; this
-    sleep keeps the average rate down.
+    Yields:
+        One `DecisionPdfFetchResult` per row.
     """
     doc_col = FwdPdfCandidateColumn.DOCUMENT_IDENTIFIER.value
     uri_col = FwdPdfCandidateColumn.FILE_DOWNLOAD_URI.value

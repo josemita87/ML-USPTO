@@ -1,24 +1,4 @@
-"""Feature engineering for IPR cancellation prediction (binary target).
-
-Single pipeline: takes the joined frame in, returns the model-ready
-matrix out. Owns every step downstream of the join — T₀ leakage
-filtering on patent event/assignment arrays, count/span aggregation,
-and the static-feature transforms (date breakdown, one-hots, frequency
-encoding, regime indicators, imputation).
-
-T₀ enforcement (per `docs/scope/prediction_scope.md` §4): for each row,
-the petition-side `petition_filing_date` is T₀; events whose
-`event_date >= T₀` are dropped before counting, as are events whose
-codes start with a TRIAL prefix or fall in
-`BANNED_EVENT_CATEGORIES` (the codes that leak label information).
-Assignments require `assignment_received_date < T₀` OR
-`assignment_recorded_date < T₀` to count.
-
-Missingness — see `docs/features/patent_file_wrapper_features.md`
-§"Missingness semantics" for the full rationale on the four regimes
-(no wrapper / no assignment / legitimate-zero counts / nullable scalars)
-and why the regime indicators are added *before* imputation.
-"""
+"""Joined frame → leakage-free intermediate feature matrix."""
 
 from __future__ import annotations
 
@@ -26,11 +6,14 @@ import logging
 import re
 from datetime import date
 
+import numpy as np
 import pandas as pd
 
 from ml_uspto.features.schemas.constants import (
     BANNED_EVENT_CATEGORIES,
     EVENT_CODE_CATEGORIES,
+    FREQUENCY_CATEGORICAL_COLUMNS,
+    OHE_CATEGORICAL_COLUMNS,
     PATENT_COUNT_FEATURES,
     PATENT_NULLABLE_NUMERIC,
     TRIAL_EVENT_PREFIXES,
@@ -75,10 +58,22 @@ def _normalize_assignee(name: str) -> str:
 
 
 def _aggregate_patent_row(row: pd.Series) -> dict[str, object]:
-    """Apply T0 leakage discipline + count/span aggregation to one joined-frame row.
+    """Apply T₀ leakage discipline + count/span aggregation to one joined-frame row.
 
-    Reads T0 (`petition_filing_date`) and the patent parallel-array
-    columns; NaN/missing arrays are treated as empty.
+    T₀ enforcement (per `docs/scope/prediction_scope.md` §4): events
+    whose `event_date >= T₀` are dropped before counting, as are events
+    whose codes start with a `TRIAL_EVENT_PREFIXES` value or fall in
+    `BANNED_EVENT_CATEGORIES`. Assignments require
+    `assignment_received_date < T₀` OR `assignment_recorded_date < T₀`
+    to count.
+
+    Args:
+        row: A single row of the joined frame, carrying
+            `petition_filing_date` (T₀) and the patent parallel-array
+            columns. NaN/missing arrays are treated as empty.
+
+    Returns:
+        Mapping of aggregated feature names to values for this row.
     """
     counts: dict[EventCategory, int] = {cat: 0 for cat in _NON_TRIAL_CATEGORIES}
 
@@ -174,17 +169,33 @@ def _aggregate_patents(joined: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Joined frame → model-ready feature matrix.
+    """Joined frame → leakage-free intermediate matrix.
 
-    Two phases:
-      1. Per-row patent aggregation: T₀ filter on event/assignment arrays,
-         count by category, span/days computations, CPC section.
-      2. Static-feature transforms: filing-date breakdown, technology /
-         CPC one-hots, petitioner/owner frequency, art-unit binning,
-         regime indicators, imputation.
+    Every output column is a function of one row's own raw fields.
+    Cross-row transforms (one-hot column-set, frequency counts, median
+    imputation, scaling) are deferred to
+    `ml_uspto.models.preprocessing.build_preprocessor`, which fits on
+    training rows only inside a CV-aware Pipeline. See
+    `docs/features/features_csv_dictionary.md` for the methodology
+    note and `docs/features/patent_file_wrapper_features.md`
+    §"Missingness semantics" for the four-regime missingness model.
 
-    The label column (`cancelled`) is *not* part of the returned frame —
-    callers attach it back from `df` if needed.
+    Args:
+        df: Joined frame from `parse.joiner.join_all`.
+
+    Returns:
+        Feature frame with calendar/row-local numerics
+        (`filing_year`, `filing_month`, `filing_dayofweek`,
+        `art_unit_group`); T₀-filtered patent aggregates
+        (`n_*_pre_t0`, `n_office_actions`,
+        `n_distinct_assignees_pre_t0`, `n_parent_applications`);
+        nullable scalars (`prosecution_span_days`,
+        `days_grant_to_petition`, `days_since_last_assignment`) paired
+        with their `_missing` regime indicators set *before* any
+        imputation; raw categoricals for the downstream encoder
+        (`technology_center`, `cpc_section`, `petitioner_real_party`,
+        `owner_real_party`). The label column (`cancelled`) is not
+        part of the returned frame — callers attach it back from `df`.
     """
     patent_features = _aggregate_patents(df)
     augmented = pd.concat(
@@ -196,43 +207,13 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
 
     if "petition_filing_date" in augmented.columns:
         pf = pd.to_datetime(augmented["petition_filing_date"], errors="coerce")
-        features["filing_year"] = pf.dt.year
-        features["filing_month"] = pf.dt.month
-        features["filing_dayofweek"] = pf.dt.dayofweek
-
-    if "technology_center" in augmented.columns:
-        tc = augmented["technology_center"].astype(str).str.strip()
-        features = pd.concat([features, pd.get_dummies(tc, prefix="tc", dtype=int)], axis=1)
-
-    if "cpc_section" in augmented.columns:
-        features = pd.concat(
-            [
-                features,
-                pd.get_dummies(
-                    augmented["cpc_section"],
-                    prefix="cpc",
-                    dtype=int,
-                    dummy_na=True,
-                ),
-            ],
-            axis=1,
-        )
-
-    if "petitioner_real_party" in augmented.columns:
-        pet_counts = augmented["petitioner_real_party"].value_counts()
-        features["petitioner_frequency"] = (
-            augmented["petitioner_real_party"].map(pet_counts).fillna(0).astype(int)
-        )
-    if "owner_real_party" in augmented.columns:
-        owner_counts = augmented["owner_real_party"].value_counts()
-        features["owner_frequency"] = (
-            augmented["owner_real_party"].map(owner_counts).fillna(0).astype(int)
-        )
+        features["filing_year"] = pf.dt.year.astype("Int64")
+        features["filing_month"] = pf.dt.month.astype("Int64")
+        features["filing_dayofweek"] = pf.dt.dayofweek.astype("Int64")
 
     if "group_art_unit" in augmented.columns:
-        features["art_unit_group"] = (
-            augmented["group_art_unit"].astype(str).str[:3]
-            .apply(pd.to_numeric, errors="coerce")
+        features["art_unit_group"] = pd.to_numeric(
+            augmented["group_art_unit"].astype(str).str[:3], errors="coerce"
         )
 
     for col in PATENT_NULLABLE_NUMERIC:
@@ -247,10 +228,10 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
             augmented["days_since_last_assignment"], errors="coerce"
         )
 
-    # Regime indicators distinguish two missingness causes that the
-    # 0-fill below would collapse: no file wrapper at all vs. wrapper
-    # with empty assignmentBag (see docs/features/patent_file_wrapper_features.md
-    # §"Missingness semantics").
+    # Regime indicators distinguish missingness causes that a downstream
+    # imputer would otherwise collapse: no file wrapper at all vs.
+    # wrapper with empty assignmentBag (see
+    # docs/features/patent_file_wrapper_features.md §"Missingness semantics").
     if "n_assignments_pre_t0" in augmented.columns:
         features["no_recorded_assignment"] = (
             pd.to_numeric(augmented["n_assignments_pre_t0"], errors="coerce").fillna(0) == 0
@@ -260,17 +241,22 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
             pd.to_numeric(augmented["n_events_pre_t0"], errors="coerce").isna().astype(int)
         )
 
+    # Counts: NaN ⇒ no file wrapper at all, which is row-local and
+    # safe to fill with 0 (the regime is captured by
+    # `patent_features_missing` above).
     for col in PATENT_COUNT_FEATURES:
         if col in augmented.columns:
             features[col] = (
                 pd.to_numeric(augmented[col], errors="coerce").fillna(0).astype(int)
             )
 
-    for col in (*PATENT_NULLABLE_NUMERIC, "days_since_last_assignment"):
-        if col in features.columns:
-            features[col] = features[col].fillna(features[col].median())
-
-    features = features.fillna(0)
+    # Raw categoricals — encoded downstream by the modeling preprocessor
+    # so the encoder is fit on training rows only. Plain object dtype
+    # with NaN for missing keeps sklearn's encoders happy.
+    for col in (*OHE_CATEGORICAL_COLUMNS, *FREQUENCY_CATEGORICAL_COLUMNS):
+        if col in augmented.columns:
+            values = augmented[col].astype(object)
+            features[col] = values.where(values.notna(), np.nan)
 
     logger.info("Built %d features for %d samples", features.shape[1], features.shape[0])
     return features

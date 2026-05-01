@@ -1,10 +1,4 @@
-"""Constants for `ml_uspto.parse`, sourced from YAML config.
-
-Petition-picker numeric/categorical knobs. Compiled regex patterns live
-in `parse.schemas.patterns`, not here. Patent event-code taxonomy lives
-in `features.schemas.constants` alongside its consumer
-`features.transforms.build_features`.
-"""
+"""Petition-picker numeric/categorical constants for `ml_uspto.parse`."""
 
 from functools import lru_cache
 

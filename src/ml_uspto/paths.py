@@ -1,18 +1,4 @@
-"""Central path resolution for the project.
-
-Single source of truth for filesystem layout. Every module that needs an
-absolute path imports from here instead of constructing
-`PROJECT_ROOT / "config" / "..."` inline. Mirrors CLAUDE.md's no-scattered-
-constants invariant for filesystem locations.
-
-Two flavors:
-- **Repo-fixed paths** (constants) — config file locations, the env file.
-  These are part of the repo's contract and never change at runtime.
-- **Settings-derived paths** (functions) — `raw_dir()`, `processed_dir()`,
-  `models_dir()`. These read from `config/settings.yaml::data.*` so the
-  call has to be a function (settings is loaded lazily to avoid a
-  `paths → settings → paths` import cycle).
-"""
+"""Central path resolution for the project."""
 
 from pathlib import Path
 

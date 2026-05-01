@@ -1,8 +1,4 @@
-"""Parse-local enums.
-
-Used to keep callers off of free-string Literals: `flatten(records, Parser.PROCEEDINGS)`
-instead of `flatten(records, "proceedings")`.
-"""
+"""Parse-local enums."""
 
 from enum import StrEnum
 

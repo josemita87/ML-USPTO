@@ -1,18 +1,4 @@
-"""Backend-agnostic storage protocol.
-
-`Storage` is the contract every backend implements. Two surfaces:
-
-  - `load_frame` / `save_frame` — tabular outputs keyed by `Frame`. Frames
-    live in a single project namespace (the "processed" outputs); there's
-    no bucket because there's only one. Backend chooses the on-wire
-    format (parquet for `LocalStorage`).
-  - `load_object` / `save_object` / `iter_objects` — JSON-shaped object
-    cache keyed by `(bucket, key)`. Buckets are pipeline `Stage` values;
-    keys are opaque (page numbers, application numbers, …).
-
-Concrete implementations live under `clients/` (`clients/local.py`,
-`clients/s3.py`). Callers depend on the Protocol, not on a class.
-"""
+"""Backend-agnostic storage protocol."""
 
 from __future__ import annotations
 
@@ -25,7 +11,20 @@ from ml_uspto.schemas.enums import Frame
 
 
 class Storage(Protocol):
-    """Backend-agnostic storage contract; concrete impls live under `clients/`."""
+    """Backend-agnostic storage contract; concrete impls live under `clients/`.
+
+    Two surfaces:
+      - `load_frame` / `save_frame` — tabular outputs keyed by `Frame`.
+        Frames live in a single project namespace (the "processed"
+        outputs); there's no bucket because there's only one. Backend
+        chooses the on-wire format (parquet for `LocalStorage`).
+      - `load_object` / `save_object` / `iter_objects` — JSON-shaped
+        object cache keyed by `(bucket, key)`. Buckets are pipeline
+        `Stage` values; keys are opaque (page numbers, application
+        numbers, …).
+
+    Callers depend on the Protocol, not on a concrete class.
+    """
 
     def load_frame(self, key: Frame, *, columns: list[str] | None = None) -> pd.DataFrame:
         """Load the tabular output keyed by `key` (optionally projecting columns)."""

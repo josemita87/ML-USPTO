@@ -1,11 +1,14 @@
-"""Pin `features.transforms.build_features`, the single feature-engineering pipeline.
+"""Pin `features.transforms.build_features`, the leakage-free intermediate builder.
 
-Two layers:
+Two layers exercised here:
   1. Per-row T₀-leakage filter + count/span aggregation on the patent
      parallel-array columns (`event_codes`, `event_dates`,
      `assignment_received_dates`, `assignees_per_assignment`, …).
-  2. Static-feature transforms (filing-date breakdown, one-hots,
-     frequency encoding, regime indicators, imputation).
+  2. Row-local static transforms (filing-date breakdown, art-unit
+     prefix, regime indicators) and pass-through of raw categoricals
+     (`technology_center`, `cpc_section`, `petitioner_real_party`,
+     `owner_real_party`) — encoded downstream by the modeling-side
+     preprocessor.
 
 The fixture mirrors the joined-frame shape that `parse.joiner.join_all`
 emits — proceedings/petition cols + the patent parallel arrays.
@@ -108,19 +111,34 @@ def test_prosecution_span_uses_only_pre_t0_events():
     ).days
 
 
-def test_grant_date_none_yields_grant_to_petition_imputed():
-    """Missing grant_date imputes days_grant_to_petition to 0 and sets the missing flag."""
+def test_grant_date_none_yields_nan_with_missing_flag():
+    """Missing grant_date leaves days_grant_to_petition NaN and sets the paired indicator.
+
+    Imputation lives in the modeling-side preprocessor, so the
+    intermediate frame must surface the NaN for `SimpleImputer` to fill
+    on training rows only.
+    """
     features = build_features(_joined_frame())
-    # Single row + no grant → median over NaN is NaN; final fillna(0) hits it.
-    assert features["days_grant_to_petition"].iloc[0] == 0
-    # Paired indicator flags the missing.
+    assert pd.isna(features["days_grant_to_petition"].iloc[0])
     assert features["days_grant_to_petition_missing"].iloc[0] == 1
 
 
-def test_cpc_section_one_hot_picks_first_letter():
-    """CPC one-hot encoding keys off the section letter of the first code."""
+def test_cpc_section_passes_through_first_letter():
+    """CPC section is exposed as the section letter; one-hot is downstream."""
     features = build_features(_joined_frame())
-    assert features["cpc_H"].iloc[0] == 1
+    assert features["cpc_section"].iloc[0] == "H"
+
+
+def test_raw_categoricals_passed_through_unencoded():
+    """Party identifiers and TC are kept raw for the modeling preprocessor."""
+    features = build_features(_joined_frame())
+    assert features["technology_center"].iloc[0] == "2400"
+    assert features["petitioner_real_party"].iloc[0] == "Acme"
+    assert features["owner_real_party"].iloc[0] == "Globex"
+    # Frequency / one-hot columns must NOT be emitted by build_features —
+    # otherwise we'd be back to corpus-level leakage.
+    for col in ("petitioner_frequency", "owner_frequency", "tc_2400", "cpc_H"):
+        assert col not in features.columns
 
 
 def test_no_recorded_assignment_regime_indicator():
