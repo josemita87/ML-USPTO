@@ -1,1 +1,1 @@
-"""Model-training-local enums and constants."""
+"""Subpackage-local enums for `ml_uspto.models`."""

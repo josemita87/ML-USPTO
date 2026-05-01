@@ -10,7 +10,6 @@ Account/region come from the active CLI profile (`CDK_DEFAULT_ACCOUNT` /
 import os
 
 import aws_cdk as cdk
-
 from stacks.compute import ComputeStack
 from stacks.foundation import FoundationStack
 from stacks.orchestration import OrchestrationStack

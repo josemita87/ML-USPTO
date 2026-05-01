@@ -14,6 +14,7 @@ import pandas as pd
 
 
 def to_date(value: Any) -> date | None:
+    """Coerce a heterogeneous date-like value to `date`, returning None on failure."""
     if value is None or (isinstance(value, float) and pd.isna(value)):
         return None
     if isinstance(value, datetime):

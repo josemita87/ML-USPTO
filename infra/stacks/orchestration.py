@@ -34,16 +34,28 @@ from __future__ import annotations
 import aws_cdk as cdk
 from aws_cdk import (
     aws_ec2 as ec2,
+)
+from aws_cdk import (
     aws_ecs as ecs,
+)
+from aws_cdk import (
     aws_events as events,
+)
+from aws_cdk import (
     aws_events_targets as targets,
+)
+from aws_cdk import (
     aws_stepfunctions as sfn,
+)
+from aws_cdk import (
     aws_stepfunctions_tasks as sfn_tasks,
 )
 from constructs import Construct
 
 
 class OrchestrationStack(cdk.Stack):
+    """Wire the weekly ECS-backed ingestion and feature pipeline."""
+
     def __init__(
         self,
         scope: Construct,
@@ -53,6 +65,7 @@ class OrchestrationStack(cdk.Stack):
         task_definition: ecs.FargateTaskDefinition,
         **kwargs,
     ) -> None:
+        """Create the state machine, stage tasks, and weekly trigger."""
         super().__init__(scope, construct_id, **kwargs)
 
         # One SG shared across every state — avoids per-task SG sprawl.

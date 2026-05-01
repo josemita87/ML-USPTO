@@ -1,3 +1,4 @@
+"""Tests for `ingest.fetch.fetch_patents` request batching and miss handling."""
 from pathlib import Path
 
 import requests
@@ -8,12 +9,16 @@ from ml_uspto.ingest.schemas.enums import Stage
 
 
 class FakeUSPTOClient:
+    """Stub USPTOClient that records requested application numbers."""
+
     def __init__(self, records=None, error=None):
+        """Seed the stub with optional canned records and an optional error to raise."""
         self.records = records or {}
         self.error = error
         self.calls = []
 
     def search_applications_post(self, *, filters, offset, limit):
+        """Return canned records for the filtered application numbers, or raise."""
         values = filters[0]["value"]
         self.calls.append(list(values))
         if self.error is not None:
@@ -33,6 +38,7 @@ def _storage(tmp_path: Path) -> LocalStorage:
 
 
 def test_fetch_patents_dedups_and_extracts_wrapper_record(tmp_path: Path):
+    """Duplicate application numbers collapse to one search call and one result."""
     storage = _storage(tmp_path)
     client = FakeUSPTOClient({"14709428": {"applicationMetaData": {"filingDate": "2015-05-11"}}})
 
@@ -48,6 +54,7 @@ def test_fetch_patents_dedups_and_extracts_wrapper_record(tmp_path: Path):
 
 
 def test_fetch_patents_missing_search_result_yields_empty_and_retries_next_run(tmp_path: Path):
+    """Misses are not cached so the next run re-queries the API."""
     storage = _storage(tmp_path)
     client = FakeUSPTOClient()
 
@@ -63,6 +70,7 @@ def test_fetch_patents_missing_search_result_yields_empty_and_retries_next_run(t
 
 
 def test_fetch_patents_http_error_yields_empty_for_each_app(tmp_path: Path):
+    """A failed batch produces one empty result per requested application."""
     storage = _storage(tmp_path)
     response = requests.Response()
     response.status_code = 503

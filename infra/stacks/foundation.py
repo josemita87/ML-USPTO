@@ -18,15 +18,24 @@ from __future__ import annotations
 import aws_cdk as cdk
 from aws_cdk import (
     aws_ecr as ecr,
+)
+from aws_cdk import (
     aws_iam as iam,
+)
+from aws_cdk import (
     aws_s3 as s3,
+)
+from aws_cdk import (
     aws_secretsmanager as secretsmanager,
 )
 from constructs import Construct
 
 
 class FoundationStack(cdk.Stack):
+    """Long-lived primitives (bucket, ECR repo, secret, task role) for downstream stacks."""
+
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
+        """Provision the S3 bucket, ECR repo, API-key secret, and Fargate task role."""
         super().__init__(scope, construct_id, **kwargs)
 
         self.bucket = s3.Bucket(

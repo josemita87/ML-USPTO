@@ -37,6 +37,7 @@ SAMPLE_PROCEEDING = {
 
 
 def test_proceeding_round_trip():
+    """Validate and serialize a representative proceeding payload."""
     p = Proceeding.model_validate(SAMPLE_PROCEEDING)
 
     assert p.trial_number == "IPR2026-00339"
@@ -53,6 +54,7 @@ def test_proceeding_round_trip():
 
 
 def test_proceeding_tolerates_missing_optional_fields():
+    """Allow absent optional proceeding subfields."""
     minimal = {"trialNumber": "IPR2026-00001"}
     p = Proceeding.model_validate(minimal)
 
@@ -62,6 +64,7 @@ def test_proceeding_tolerates_missing_optional_fields():
 
 
 def test_proceeding_ignores_unknown_fields():
+    """Ignore unexpected upstream fields during proceeding validation."""
     payload = {**SAMPLE_PROCEEDING, "unexpectedTopLevel": "ignore-me"}
     p = Proceeding.model_validate(payload)
 
@@ -76,6 +79,7 @@ def test_proceeding_ignores_unknown_fields():
 
 
 def test_petition_minimal_construction():
+    """Construct a minimal internal Petition model."""
     p = Petition(
         trial_number="IPR2024-00123",
         petition_document_id="doc-abc",
@@ -87,6 +91,7 @@ def test_petition_minimal_construction():
 
 
 def test_pdf_fetch_manifest_row_records_failure():
+    """Represent failed PDF fetches without bytes or hashes."""
     row = PdfFetchManifestRow(
         trial_number="IPR2024-00123",
         http_status=503,
@@ -99,6 +104,7 @@ def test_pdf_fetch_manifest_row_records_failure():
 
 
 def test_petition_text_doc_holds_pages():
+    """Store extracted petition pages in the text-doc model."""
     doc = PetitionTextDoc(
         trial_number="IPR2024-00123",
         page_count=2,
@@ -111,6 +117,7 @@ def test_petition_text_doc_holds_pages():
 
 
 def test_petition_text_features_word_count_optional_others_zero():
+    """Default absent petition-text feature counts to zero."""
     feats = PetitionTextFeatures(
         trial_number="IPR2024-00123",
         petition_page_count=88,
@@ -124,6 +131,7 @@ def test_petition_text_features_word_count_optional_others_zero():
 
 
 def test_patent_fetch_result_shape():
+    """Represent successful and missing patent fetch outcomes."""
     success = PatentFetchResult(
         application_number="14709428",
         raw_record={"applicationNumberText": "14709428"},

@@ -17,6 +17,7 @@ from ml_uspto.settings import get_settings
 
 
 def main() -> None:
+    """Fetch IPR decisions and persist them as the decisions frame."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--max-pages", type=int, default=None, help="cap pagination for smoke runs")
     args = parser.parse_args()

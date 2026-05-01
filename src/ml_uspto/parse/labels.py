@@ -49,8 +49,8 @@ import logging
 
 import pandas as pd
 
-from ml_uspto.protocols.storage import Storage
 from ml_uspto.ingest.schemas.enums import Stage
+from ml_uspto.protocols.storage import Storage
 from ml_uspto.schemas.constants import (
     FWD_DECISION_TYPE_MARKER,
     FWD_ORIGINAL_MARKER,
@@ -86,9 +86,11 @@ def extract_outcome(text: str) -> int | None:
 
 
 def _identify_terminating_fwd(decisions: pd.DataFrame) -> pd.DataFrame:
-    """Return one row per trial with the terminating-FWD metadata needed
-    for label resolution: `terminating_outcome`, `document_title`, and
-    `document_identifier` (for text-blob lookup).
+    """Return one row per trial with terminating-FWD metadata.
+
+    The output carries fields needed for label resolution:
+    `terminating_outcome`, `document_title`, and `document_identifier`
+    for text-blob lookup.
 
     Filters to *original* FWDs only — `documentTypeDescriptionText`
     matching both `FWD_DECISION_TYPE_MARKER` ("Final Written Decision",

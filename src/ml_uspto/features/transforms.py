@@ -75,9 +75,10 @@ def _normalize_assignee(name: str) -> str:
 
 
 def _aggregate_patent_row(row: pd.Series) -> dict[str, object]:
-    """Apply T₀ leakage discipline + count/span aggregation to one
-    joined-frame row. Reads T₀ (`petition_filing_date`) and the patent
-    parallel-array columns; NaN/missing arrays are treated as empty.
+    """Apply T0 leakage discipline + count/span aggregation to one joined-frame row.
+
+    Reads T0 (`petition_filing_date`) and the patent parallel-array
+    columns; NaN/missing arrays are treated as empty.
     """
     counts: dict[EventCategory, int] = {cat: 0 for cat in _NON_TRIAL_CATEGORIES}
 
@@ -97,7 +98,11 @@ def _aggregate_patent_row(row: pd.Series) -> dict[str, object]:
         }
 
     kept_event_dates: list[date] = []
-    for code, raw_d in zip(_as_list(row.get("event_codes")), _as_list(row.get("event_dates"))):
+    for code, raw_d in zip(
+        _as_list(row.get("event_codes")),
+        _as_list(row.get("event_dates")),
+        strict=False,
+    ):
         d = to_date(raw_d)
         if d is None or d >= t0:
             continue
@@ -121,6 +126,7 @@ def _aggregate_patent_row(row: pd.Series) -> dict[str, object]:
         _as_list(row.get("assignment_received_dates")),
         _as_list(row.get("assignment_recorded_dates")),
         _as_list(row.get("assignees_per_assignment")),
+        strict=False,
     ):
         candidates = [d for d in (to_date(r), to_date(c)) if d is not None and d < t0]
         if not candidates:
@@ -181,7 +187,10 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     callers attach it back from `df` if needed.
     """
     patent_features = _aggregate_patents(df)
-    augmented = pd.concat([df.reset_index(drop=True), patent_features.reset_index(drop=True)], axis=1)
+    augmented = pd.concat(
+        [df.reset_index(drop=True), patent_features.reset_index(drop=True)],
+        axis=1,
+    )
 
     features = pd.DataFrame(index=augmented.index)
 
@@ -197,7 +206,15 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
 
     if "cpc_section" in augmented.columns:
         features = pd.concat(
-            [features, pd.get_dummies(augmented["cpc_section"], prefix="cpc", dtype=int, dummy_na=True)],
+            [
+                features,
+                pd.get_dummies(
+                    augmented["cpc_section"],
+                    prefix="cpc",
+                    dtype=int,
+                    dummy_na=True,
+                ),
+            ],
             axis=1,
         )
 

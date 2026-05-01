@@ -32,6 +32,7 @@ from ml_uspto.settings import get_settings
 
 
 def main() -> None:
+    """Fetch patent application file wrappers and persist the patents frame."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--max-apps", type=int, default=None, help="cap application fetches")
     parser.add_argument(

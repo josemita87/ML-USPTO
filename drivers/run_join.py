@@ -13,6 +13,7 @@ from ml_uspto.schemas.enums import Frame
 
 
 def main() -> None:
+    """Join the per-stage frames and write the labeled joined-trials frame."""
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )

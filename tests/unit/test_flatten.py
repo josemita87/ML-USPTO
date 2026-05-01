@@ -5,6 +5,7 @@ from ml_uspto.parse.schemas.enums import Parser
 
 
 def test_proceedings_parser_flattens_known_payload():
+    """Proceedings parser maps known nested keys onto the configured column names."""
     records = [
         {
             "trialNumber": "IPR2026-00339",
@@ -26,12 +27,14 @@ def test_proceedings_parser_flattens_known_payload():
 
 
 def test_decisions_parser_loads():
+    """Decisions parser config exposes the trial_number and decision_issue_date columns."""
     cfg = load_parser_config(Parser.DECISIONS)
     assert "trial_number" in cfg["columns"]
     assert cfg["columns"]["decision_issue_date"] == "decisionData.decisionIssueDate"
 
 
 def test_missing_paths_become_none():
+    """Unresolved dotted paths yield None instead of raising."""
     config = {"columns": {"a": "x.y", "b": "z"}}
     df = flatten_records([{"x": {}}], config)
     assert df.iloc[0]["a"] is None

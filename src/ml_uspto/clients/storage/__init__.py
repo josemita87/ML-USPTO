@@ -1,10 +1,4 @@
-"""Storage clients + settings-driven factory.
-
-`get_storage()` reads `settings.storage` (which sources `ML_USPTO_STORAGE`
-and `ML_USPTO_S3_BUCKET` from env via pydantic-settings — never read env
-directly here). The Fargate task definition injects `backend=s3` +
-bucket name; laptop runs default to local.
-"""
+"""Storage clients + settings-driven factory."""
 
 from __future__ import annotations
 
@@ -15,6 +9,13 @@ from .s3 import S3Storage
 
 
 def get_storage():
+    """Resolve the storage backend from settings.
+
+    Reads `settings.storage` (which sources `ML_USPTO_STORAGE` and
+    `ML_USPTO_S3_BUCKET` from env via pydantic-settings — never read env
+    directly here). The Fargate task definition injects `backend=s3` +
+    bucket name; laptop runs default to local.
+    """
     cfg = get_settings().storage
     backend = cfg.backend.lower()
     if backend == "s3":

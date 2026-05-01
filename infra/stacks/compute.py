@@ -25,16 +25,28 @@ from __future__ import annotations
 import aws_cdk as cdk
 from aws_cdk import (
     aws_ecr as ecr,
+)
+from aws_cdk import (
     aws_ecs as ecs,
+)
+from aws_cdk import (
     aws_iam as iam,
+)
+from aws_cdk import (
     aws_logs as logs,
+)
+from aws_cdk import (
     aws_s3 as s3,
+)
+from aws_cdk import (
     aws_secretsmanager as secretsmanager,
 )
 from constructs import Construct
 
 
 class ComputeStack(cdk.Stack):
+    """Fargate cluster, log group, and a generic stage-driver task definition."""
+
     def __init__(
         self,
         scope: Construct,
@@ -46,6 +58,7 @@ class ComputeStack(cdk.Stack):
         task_role: iam.IRole,
         **kwargs,
     ) -> None:
+        """Wire the cluster, execution role, and parameterised task definition."""
         super().__init__(scope, construct_id, **kwargs)
 
         self.cluster = ecs.Cluster(

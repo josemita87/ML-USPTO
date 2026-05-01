@@ -108,6 +108,7 @@ def _try_extract(pdf_bytes: bytes) -> tuple[str | None, dict[str, Any]]:
 
 
 def main() -> None:
+    """Sample, download, and extract text from a stratified set of FWD PDFs."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--target", type=int, default=25, help="number of PDFs to sample")
     parser.add_argument("--seed", type=int, default=0)

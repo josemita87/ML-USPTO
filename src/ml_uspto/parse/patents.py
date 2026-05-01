@@ -37,9 +37,12 @@ def _unwrap_record(payload: Mapping[str, Any]) -> Mapping[str, Any]:
 
 
 def _normalize_cpc_classifications(record: Mapping[str, Any]) -> list[str]:
-    """`cpcClassificationBag` entries are inconsistently typed across
-    the corpus (sometimes `list[str]`, sometimes `list[dict]`, sometimes
-    a single non-list value). Normalize to a flat `list[str]`."""
+    """Normalize `cpcClassificationBag` entries to a flat `list[str]`.
+
+    Entries are inconsistently typed across the corpus: sometimes
+    `list[str]`, sometimes `list[dict]`, sometimes a single non-list
+    value. This function flattens all variants.
+    """
     app_meta = record.get("applicationMetaData") or {}
     if not isinstance(app_meta, Mapping):
         return []

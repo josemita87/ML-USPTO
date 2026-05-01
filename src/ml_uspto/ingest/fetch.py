@@ -34,12 +34,12 @@ import pandas as pd
 import pdfplumber
 import requests
 
-from ml_uspto.protocols.storage import Storage
 from ml_uspto.clients.uspto import USPTOClient
 from ml_uspto.ingest.schemas.constants import PETITION_SCAN_CATEGORIES, STAGE_RECORDS_KEY
 from ml_uspto.ingest.schemas.enums import FwdPdfCandidateColumn, Stage
 from ml_uspto.parse.flatten import flatten
 from ml_uspto.parse.schemas.enums import Parser
+from ml_uspto.protocols.storage import Storage
 from ml_uspto.schemas.enums import Frame
 from ml_uspto.schemas.models import (
     DecisionPdfFetchResult,
@@ -332,8 +332,10 @@ def fetch_decision_pdfs(
     *,
     rate_sleep: float = 2.0,
 ) -> Iterator[DecisionPdfFetchResult]:
-    """Download each candidate FWD PDF, extract text, save under
-    `Stage.DECISION_TEXTS`, yield one outcome per row.
+    """Download each candidate FWD PDF.
+
+    Extract text, save under `Stage.DECISION_TEXTS`, and yield one outcome
+    per row.
 
     `candidates` is the frame returned by
     `ingest.decisions.enumerate_missing_fwd_pdfs` — already filtered for
@@ -378,7 +380,12 @@ def fetch_decision_pdfs(
             with pdfplumber.open(io.BytesIO(payload)) as pdf:
                 text = "\n".join((page.extract_text() or "") for page in pdf.pages)
         except Exception as exc:  # noqa: BLE001 — pdfplumber raises a zoo of types
-            logger.warning("FWD-PDF pdfplumber error doc=%s: %s: %s", doc_id, type(exc).__name__, exc)
+            logger.warning(
+                "FWD-PDF pdfplumber error doc=%s: %s: %s",
+                doc_id,
+                type(exc).__name__,
+                exc,
+            )
             yield DecisionPdfFetchResult(document_identifier=doc_id)
             time.sleep(rate_sleep)
             continue

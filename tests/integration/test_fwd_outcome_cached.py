@@ -1,5 +1,4 @@
-"""Integration tests for `parse.labels.extract_outcome` against real
-FWD opinion text cached under `data/raw/decision_texts/`.
+"""Integration tests for FWD outcome extraction against cached opinion text.
 
 These tests intentionally read text from the live cache rather than
 checked-in fixtures: the regex is the load-bearing label-extraction logic
@@ -81,6 +80,7 @@ _MANIFEST = _load_manifest()
 
 @pytest.fixture(scope="module")
 def manifest_entries() -> list[dict]:
+    """Yield the cached FWD manifest, skipping the suite if empty."""
     if not _MANIFEST:
         pytest.skip(
             f"No FWD text sample cached. Run "

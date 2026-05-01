@@ -12,7 +12,10 @@ logger = logging.getLogger(__name__)
 
 
 class USPTOClient:
+    """HTTP client for the USPTO Open Data Portal (PTAB + applications)."""
+
     def __init__(self):
+        """Build a session preloaded with the API key from settings."""
         settings = get_settings()
         self.base_url = settings.api.base_url
         self.backoff_seconds = settings.api.backoff_seconds
@@ -27,15 +30,18 @@ class USPTOClient:
         return self._get(url, params)
 
     def search_decisions(self, query: str = "IPR", offset: int = 0, limit: int = 100) -> dict:
+        """Search decisions via GET. Query is full-text only."""
         url = f"{self.base_url}/trials/decisions/search"
         params = {"query": query, "offset": offset, "limit": limit}
         return self._get(url, params)
 
     def get_proceeding(self, trial_number: str) -> dict:
+        """Fetch a single proceeding by trial number (e.g. ``IPR2020-00001``)."""
         url = f"{self.base_url}/trials/proceedings/{trial_number}"
         return self._get(url)
 
     def get_trial_documents(self, trial_number: str) -> dict:
+        """List all filed documents for one trial."""
         url = f"{self.base_url}/trials/{trial_number}/documents"
         return self._get(url)
 
@@ -73,8 +79,11 @@ class USPTOClient:
         offset: int = 0,
         limit: int = 25,
     ) -> dict:
-        """Search decisions via POST. Supports `documentOCRText`, `statuteAndRuleBag`,
-        `issueTypeBag`, etc. when requested via `fields`."""
+        """Search decisions via POST.
+
+        Supports `documentOCRText`, `statuteAndRuleBag`, `issueTypeBag`, etc.
+        when requested via `fields`.
+        """
         url = f"{self.base_url}/trials/decisions/search"
         body = self._build_body(q, filters, range_filters, fields, facets, sort, offset, limit)
         return self._post(url, body)

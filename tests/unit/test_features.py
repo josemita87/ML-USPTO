@@ -1,5 +1,4 @@
-"""Pin `features.transforms.build_features` — the single feature-engineering
-pipeline that turns the joined frame into a model-ready matrix.
+"""Pin `features.transforms.build_features`, the single feature-engineering pipeline.
 
 Two layers:
   1. Per-row T₀-leakage filter + count/span aggregation on the patent
@@ -20,8 +19,7 @@ from ml_uspto.features.transforms import build_features
 
 
 def _joined_frame() -> pd.DataFrame:
-    """One trial whose patent has a mix of pre-T₀, post-T₀, TRIAL, and
-    banned-prefix events plus pre/post-T₀ assignments.
+    """Build a single-trial joined frame exercising every T0-filter branch.
 
     T₀ = 2022-05-23. Pre-T₀ keepers (5): IEXX, CTNF, WIDS, M2551, ZZZZ.
     Dropped: TRIALPET (banned prefix), TRIALFWD (banned prefix),
@@ -43,7 +41,16 @@ def _joined_frame() -> pd.DataFrame:
                 # Patent parallel-array cols
                 "filing_date": date(2014, 1, 1),
                 "cpc_codes": ["H04W 88/06", "G06F 17/00"],
-                "event_codes": ["IEXX", "CTNF", "WIDS", "M2551", "ZZZZ", "TRIALPET", "TRIALFWD", "CTFR"],
+                "event_codes": [
+                    "IEXX",
+                    "CTNF",
+                    "WIDS",
+                    "M2551",
+                    "ZZZZ",
+                    "TRIALPET",
+                    "TRIALFWD",
+                    "CTFR",
+                ],
                 "event_dates": [
                     date(2015, 5, 11),
                     date(2016, 1, 1),
@@ -67,9 +74,7 @@ def _joined_frame() -> pd.DataFrame:
 
 
 def test_t0_filter_drops_post_t0_trial_and_banned_events():
-    """Per-row T₀ filter: events with date ≥ T₀, TRIAL-prefix codes,
-    and banned-category codes are excluded from the counts.
-    """
+    """Post-T0, TRIAL-prefixed, and banned-category events are excluded from counts."""
     features = build_features(_joined_frame())
 
     # 5 surviving events: IEXX (PE), CTNF (EX), WIDS (AA), M2551 (MAINT), ZZZZ (OTHER).
@@ -83,10 +88,7 @@ def test_t0_filter_drops_post_t0_trial_and_banned_events():
 
 
 def test_assignments_drop_post_t0_and_dedup_assignees():
-    """Assignments require any of received/recorded < T₀. Pre-T₀
-    assignment's two assignee strings normalize to the same key → 1 distinct.
-    Post-T₀ assignment is dropped entirely.
-    """
+    """Post-T0 assignments drop and pre-T0 assignee variants normalize to one key."""
     features = build_features(_joined_frame())
 
     assert features["n_assignments_pre_t0"].iloc[0] == 1
@@ -107,9 +109,7 @@ def test_prosecution_span_uses_only_pre_t0_events():
 
 
 def test_grant_date_none_yields_grant_to_petition_imputed():
-    """When `grant_date` is None, `days_grant_to_petition` starts NaN
-    and gets median-filled on this single-row fixture (median of NaN = NaN
-    → final fillna(0))."""
+    """Missing grant_date imputes days_grant_to_petition to 0 and sets the missing flag."""
     features = build_features(_joined_frame())
     # Single row + no grant → median over NaN is NaN; final fillna(0) hits it.
     assert features["days_grant_to_petition"].iloc[0] == 0
@@ -118,11 +118,13 @@ def test_grant_date_none_yields_grant_to_petition_imputed():
 
 
 def test_cpc_section_one_hot_picks_first_letter():
+    """CPC one-hot encoding keys off the section letter of the first code."""
     features = build_features(_joined_frame())
     assert features["cpc_H"].iloc[0] == 1
 
 
 def test_no_recorded_assignment_regime_indicator():
+    """Stripping all assignments raises the no_recorded_assignment regime flag."""
     df = _joined_frame()
     # Strip all assignments to trigger the regime indicator.
     df.at[0, "assignment_received_dates"] = []

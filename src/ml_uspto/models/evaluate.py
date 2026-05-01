@@ -70,6 +70,7 @@ def plot_roc_curves(
 def plot_confusion_matrix(
     model, X_test: pd.DataFrame, y_test: pd.Series, model_name: str, output_path: Path
 ) -> None:
+    """Render and save the confusion matrix for `model` on the test set."""
     y_pred = model.predict(X_test)
     cm = confusion_matrix(y_test, y_pred)
 
@@ -116,6 +117,7 @@ def plot_feature_importance(
 
 
 def save_metrics(all_metrics: list[ModelMetrics], output_path: Path) -> None:
+    """Persist `all_metrics` to `output_path` as a JSON array."""
     payload = [m.model_dump() for m in all_metrics]
     with open(output_path, "w") as f:
         json.dump(payload, f, indent=2, default=str)

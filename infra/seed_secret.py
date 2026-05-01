@@ -46,6 +46,7 @@ def _resolve_secret_arn(cfn, stack: str) -> str:
 
 
 def main() -> int:
+    """Read the local API key and write it to the Secrets Manager entry."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--stack", default=DEFAULT_STACK)
     parser.add_argument("--region", default=None)

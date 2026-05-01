@@ -12,6 +12,7 @@ from ml_uspto.parse.petitions import pick_petition
 
 
 def doc(number, title, category="Paper"):
+    """Build a minimal PTAB document row for picker tests."""
     return {
         "documentData": {
             "documentNumber": number,
@@ -22,6 +23,7 @@ def doc(number, title, category="Paper"):
 
 
 def test_standard_post_2022_petition():
+    """Pick the PETITION-category filing over surrounding notices."""
     rows = [
         doc(1, "Petitioner's Powers of Attorney"),
         doc(2, "Petitioner's Notice Ranking Petitions"),
@@ -32,6 +34,7 @@ def test_standard_post_2022_petition():
 
 
 def test_legacy_paper_bucket_with_petition_in_title():
+    """Pick legacy Paper-bucket petitions by title."""
     rows = [
         doc(1, "Petitioner's Powers of Attorney"),
         doc(2, "Petition for IPR of 5478650"),
@@ -80,8 +83,7 @@ def test_petitioners_petition_passes_blacklist():
 
 
 def test_corrected_petition_does_not_displace_original():
-    """IPR2020-01483: when 'Petition for IPR' and 'Corrected Petition for IPR'
-    both exist, take the lowest documentNumber (the original).
+    """Take the original filing when corrected petition rows also match.
 
     Also asserts that 'Petitioner's Petition Ranking and Explanation of
     Material Differences' (a procedural multi-petition filing, NOT the
@@ -99,8 +101,11 @@ def test_corrected_petition_does_not_displace_original():
 
 
 def test_notice_of_filing_date_accorded_is_blacklisted():
-    """IPR2013-00072 / IPR2019-00041: 'Notice of Filing Date Accorded to
-    Petition' contains 'petition' but must NOT be picked."""
+    """Reject filing-date notices even though the title says petition.
+
+    IPR2013-00072 / IPR2019-00041 titles contain "petition" but must not be
+    picked.
+    """
     rows = [
         doc(1, "Power of Attorney"),
         doc(5, "Notice of Filing Date Accorded to Petition"),
@@ -119,6 +124,7 @@ def test_high_paper_numbers_excluded():
 
 
 def test_exhibits_excluded_even_if_title_says_petition():
+    """Ignore exhibit rows even when their titles mention petitions."""
     rows = [
         doc(1, "Petitioner's Power of Attorney"),
         doc(2, "Ex. 2017 Notice of IPR Petition", category="Exhibit"),
@@ -129,17 +135,22 @@ def test_exhibits_excluded_even_if_title_says_petition():
 
 
 def test_empty_input_returns_none():
+    """Return None for an empty candidate list."""
     assert pick_petition([]) is None
 
 
 def test_no_match_returns_none():
+    """Return None when no row satisfies the petition predicate."""
     rows = [doc(1, "Power of Attorney"), doc(2, "Mandatory Notices")]
     assert pick_petition(rows) is None
 
 
 def test_typo_petitioner_for_inter_partes_review_caught():
-    """IPR2024-01238: real-world typo where 'Petitioner' was written instead
-    of 'Petition'. The 'inter partes review of' alternative catches it."""
+    """Catch titles where Petitioner was written instead of Petition.
+
+    IPR2024-01238 has this real-world typo. The "inter partes review of"
+    alternative catches it.
+    """
     rows = [
         doc(1, "Notice : Power of Attorney"),
         doc(2, "Petitioner for Inter Partes Review of U.S. Patent No. 8,830,821"),

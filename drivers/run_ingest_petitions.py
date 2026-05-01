@@ -26,6 +26,7 @@ from ml_uspto.settings import get_settings
 
 
 def main() -> None:
+    """Scan documents for petitions, pick the canonical one per trial, save the petitions frame."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--max-pages", type=int, default=None, help="cap pagination for smoke runs")
     args = parser.parse_args()

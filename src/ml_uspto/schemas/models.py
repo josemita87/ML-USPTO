@@ -17,6 +17,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class TrialMetaData(BaseModel):
+    """`trialMetaData` block from a `/trials/proceedings` row."""
+
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
     trial_type: str | None = Field(default=None, alias="trialTypeCode")
@@ -29,6 +31,8 @@ class TrialMetaData(BaseModel):
 
 
 class PatentOwnerData(BaseModel):
+    """`patentOwnerData` block — challenged-patent metadata frozen at petition filing."""
+
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
     patent_number: str | None = Field(default=None, alias="patentNumber")
@@ -42,6 +46,8 @@ class PatentOwnerData(BaseModel):
 
 
 class PetitionerData(BaseModel):
+    """`regularPetitionerData` block — challenger party + counsel."""
+
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
     real_party: str | None = Field(default=None, alias="realPartyInInterestName")
@@ -49,6 +55,8 @@ class PetitionerData(BaseModel):
 
 
 class Proceeding(BaseModel):
+    """One row from `/trials/proceedings` — the per-trial header record."""
+
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
     trial_number: str = Field(alias="trialNumber")
@@ -67,6 +75,8 @@ class Proceeding(BaseModel):
 
 
 class DocumentData(BaseModel):
+    """`documentData` block — per-filing metadata (id, title, type, party, date)."""
+
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
     document_identifier: str | None = Field(default=None, alias="documentIdentifier")
@@ -78,6 +88,8 @@ class DocumentData(BaseModel):
 
 
 class DecisionData(BaseModel):
+    """`decisionData` block — present on FWD (Final Written Decision) records and the like."""
+
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
     decision_issue_date: date | None = Field(default=None, alias="decisionIssueDate")
@@ -88,6 +100,8 @@ class DecisionData(BaseModel):
 
 
 class TrialDocument(BaseModel):
+    """One row from `/trials/{id}/documents` or `/trials/decisions`."""
+
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
     trial_number: str = Field(alias="trialNumber")

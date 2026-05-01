@@ -1,7 +1,8 @@
-"""Lock in petition_assembler behavior — picker hit / picker miss outcomes
-on a single corpus pass. The assembler is pure on documents/search records;
-it returns only `Petition` rows (picker misses are silently dropped) and
-the joiner reconciles labeled trials against the petitions roster.
+"""Lock in petition_assembler picker hit and miss behavior.
+
+The assembler is pure on documents/search records; it returns only `Petition`
+rows (picker misses are silently dropped) and the joiner reconciles labeled
+trials against the petitions roster.
 """
 
 from datetime import date
@@ -30,6 +31,7 @@ def _doc_row(
 
 
 def test_happy_path_one_trial_one_petition():
+    """Assemble one petition row for a simple one-trial corpus."""
     raw = [
         _doc_row("IPR2024-00001", 1, "Power of Attorney", category="Paper"),
         _doc_row("IPR2024-00001", 2, "Petition for Inter Partes Review", category="PETITION"),
@@ -56,8 +58,9 @@ def test_corrected_petition_loses_to_original_via_picker():
 
 
 def test_picker_miss_drops_the_trial():
-    """When every candidate fails the filter, the trial is omitted from
-    the petitions output. No quarantine ledger is emitted.
+    """Omit trials when every candidate fails the petition filter.
+
+    No quarantine ledger is emitted.
     """
     raw = [
         _doc_row("IPR2024-00003", 1, "Power of Attorney", category="Paper"),
@@ -70,9 +73,10 @@ def test_picker_miss_drops_the_trial():
 
 
 def test_assembler_never_reads_trial_metadata():
-    """Even if the documents row's trialMetaData carries a different
-    petitionFilingDate, the assembler must build the Petition from
-    documentData only — proceedings is the canonical T₀ source.
+    """Build petitions from documentData only.
+
+    Even if the documents row's trialMetaData carries a different
+    petitionFilingDate, proceedings remains the canonical T0 source.
     """
     raw = [
         {
@@ -93,6 +97,7 @@ def test_assembler_never_reads_trial_metadata():
 
 
 def test_mixed_outcomes_one_call():
+    """Return hits and drop misses in the same assembler call."""
     raw = [
         _doc_row("IPR-A", 2, "Petition for Inter Partes Review"),
         _doc_row("IPR-B", 1, "Power of Attorney", category="Paper"),
@@ -102,4 +107,5 @@ def test_mixed_outcomes_one_call():
 
 
 def test_empty_input_returns_empty_list():
+    """Return an empty list for an empty document corpus."""
     assert assemble_petitions([]) == []

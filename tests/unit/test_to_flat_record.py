@@ -65,6 +65,7 @@ def _payload() -> dict:
 
 
 def test_parse_patent_wrapper_typed_view():
+    """Parse a raw file-wrapper payload into the typed view."""
     wrapper = parse_patent_wrapper(_payload())
     assert wrapper.application_number == "14709428"
     assert wrapper.cpc_classifications == ["H04W 88/06", "G06F 17/00"]
@@ -74,6 +75,7 @@ def test_parse_patent_wrapper_typed_view():
 
 
 def test_flat_record_scalars():
+    """Flatten scalar patent wrapper fields into model columns."""
     flat = to_flat_record(_payload())
     assert flat["application_number"] == "14709428"
     assert flat["filing_date"] == date(2015, 5, 11)
@@ -92,12 +94,18 @@ def test_flat_record_scalars():
 
 
 def test_flat_record_parallel_event_arrays():
+    """Preserve event codes and dates as parallel arrays."""
     flat = to_flat_record(_payload())
     assert flat["event_codes"] == ["IEXX", "CTNF", "WIDS"]
-    assert flat["event_dates"] == [date(2015, 5, 11), date(2016, 1, 1), date(2016, 2, 1)]
+    assert flat["event_dates"] == [
+        date(2015, 5, 11),
+        date(2016, 1, 1),
+        date(2016, 2, 1),
+    ]
 
 
 def test_flat_record_assignments_preserve_grouping():
+    """Preserve per-assignment assignee grouping."""
     flat = to_flat_record(_payload())
     assert flat["assignment_received_dates"] == [date(2018, 1, 1), date(2022, 6, 1)]
     assert flat["assignment_recorded_dates"] == [date(2018, 1, 5), None]
@@ -116,6 +124,7 @@ def test_flat_record_handles_envelope_payload():
 
 
 def test_flat_record_handles_empty_bags():
+    """Emit empty arrays and null scalars for absent nested bags."""
     flat = to_flat_record({"applicationNumberText": "00000000"})
     assert flat["application_number"] == "00000000"
     assert flat["event_codes"] == []

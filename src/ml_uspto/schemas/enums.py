@@ -10,6 +10,8 @@ from enum import StrEnum
 
 
 class TrialType(StrEnum):
+    """PTAB trial types: IPR (inter partes review), PGR (post-grant review), CBM, DER."""
+
     IPR = "IPR"
     PGR = "PGR"
     CBM = "CBM"
@@ -50,12 +52,12 @@ class Frame(StrEnum):
 
 
 class DocumentCategory(StrEnum):
-    """Subset of USPTO ODP `documentData.documentCategory` values referenced
-    in code (scan filter, exhibit drop). Values are API-canonical casing.
+    """Subset of USPTO ODP `documentData.documentCategory` values referenced in code.
 
-    The full set on the documents endpoint is ~21 values (PETITION, Paper,
-    OTHER, NOTICE, MOTION, ORDER, RESPONSE, DECISION, FINAL, REPLY, POPR,
-    SURREPLY, ADVRSJUDG, …); add members as code starts to switch on them.
+    Values use API-canonical casing. Full endpoint set is ~21 values
+    (PETITION, Paper, OTHER, NOTICE, MOTION, ORDER, RESPONSE, DECISION,
+    FINAL, REPLY, POPR, SURREPLY, ADVRSJUDG, ...); add members as code
+    starts to switch on them (scan filter, exhibit drop, etc.).
     """
 
     PETITION = "PETITION"

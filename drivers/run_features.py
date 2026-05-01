@@ -16,6 +16,7 @@ from ml_uspto.schemas.enums import Frame
 
 
 def main() -> None:
+    """Build the feature matrix from the joined trials frame."""
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
@@ -23,7 +24,10 @@ def main() -> None:
     joined = storage.load_frame(Frame.JOINED_TRIALS)
     matrix = build_features(joined)
     storage.save_frame(matrix, Frame.FEATURES)
-    print(f"features: {matrix.shape[0]} rows × {matrix.shape[1]} cols -> frame {Frame.FEATURES.value}")
+    print(
+        f"features: {matrix.shape[0]} rows × {matrix.shape[1]} cols "
+        f"-> frame {Frame.FEATURES.value}"
+    )
 
 
 if __name__ == "__main__":

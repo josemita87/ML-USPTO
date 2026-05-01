@@ -1,3 +1,4 @@
+"""Tests for `parse.joiner.join_all` label resolution and frame assembly."""
 import logging
 from datetime import date
 from pathlib import Path
@@ -10,11 +11,12 @@ from ml_uspto.parse.joiner import join_all
 
 
 def _trials_frame() -> pd.DataFrame:
-    """Three trials covering each label-resolution path:
-      - LABEL_BY_STATUS_0 → trial_status = "Institution Denied"
-      - LABEL_BY_FWD_1    → trial_status = "Final Written Decision" + decisions FWD
-                            with trialOutcome = "All Challenged Claims Unpatentable"
-      - NO_PETITION       → labeled but no petition row → dropped by inner-join
+    """Three trials covering each label-resolution path.
+
+    - LABEL_BY_STATUS_0 -> trial_status = "Institution Denied"
+    - LABEL_BY_FWD_1    -> trial_status = "Final Written Decision" + decisions FWD
+                           with trialOutcome = "All Challenged Claims Unpatentable"
+    - NO_PETITION       -> labeled but no petition row -> dropped by inner-join
     """
     return pd.DataFrame(
         [
@@ -89,9 +91,7 @@ def _petitions_frame(fwd_doc_date: date = date(2022, 5, 23)) -> pd.DataFrame:
 
 
 def _patents_frame() -> pd.DataFrame:
-    """Two patents matching the two trials' application_numbers. Carries
-    parallel-array cols for events/assignments, mirroring the shape that
-    `parse.patents.to_flat_record` produces."""
+    """Two patents matching the trials' application numbers with parallel-array cols."""
     return pd.DataFrame(
         [
             {
@@ -122,10 +122,12 @@ def _patents_frame() -> pd.DataFrame:
 
 @pytest.fixture
 def empty_storage(tmp_path: Path) -> LocalStorage:
+    """LocalStorage rooted at a fresh tmp_path with no seeded objects."""
     return LocalStorage(raw_root=tmp_path / "raw", processed_root=tmp_path / "processed")
 
 
 def test_join_all_drops_labeled_trials_without_petition_row(empty_storage):
+    """Labeled trials missing a petition row are dropped by the inner join."""
     df, report = join_all(
         empty_storage,
         trials=_trials_frame(),
@@ -141,6 +143,7 @@ def test_join_all_drops_labeled_trials_without_petition_row(empty_storage):
 
 
 def test_join_all_assigns_correct_labels(empty_storage):
+    """Status-resolved and FWD-resolved trials receive the expected cancelled labels."""
     df, _ = join_all(
         empty_storage,
         trials=_trials_frame(),
@@ -155,9 +158,7 @@ def test_join_all_assigns_correct_labels(empty_storage):
 
 
 def test_join_all_attaches_patent_arrays(empty_storage):
-    """Joined frame carries the patent parallel-array cols from the
-    patents merge, ready for the features stage to filter/aggregate.
-    """
+    """Joined frame carries the patent parallel-array cols for the features stage."""
     df, _ = join_all(
         empty_storage,
         trials=_trials_frame(),
@@ -172,8 +173,11 @@ def test_join_all_attaches_patent_arrays(empty_storage):
 
 
 def test_join_all_left_joins_missing_patents(empty_storage):
-    """Trials whose patent isn't in `patents.parquet` (fetch failed)
-    survive the join with NaN for every patent column."""
+    """Left-join trials whose patent fetch failed.
+
+    Trials whose patent isn't in `patents.parquet` survive the join with NaN
+    for every patent column.
+    """
     patents_partial = _patents_frame().iloc[:1]  # only IPR2022-LABEL_BY_STATUS_0's app
     df, report = join_all(
         empty_storage,
@@ -192,6 +196,7 @@ def test_join_all_left_joins_missing_patents(empty_storage):
 
 
 def test_join_warns_on_t0_mismatch_proceedings_wins(empty_storage, caplog):
+    """Warn on petition T0 mismatches and keep proceedings as canonical."""
     petitions = _petitions_frame(fwd_doc_date=date(2022, 5, 28))
     with caplog.at_level(logging.WARNING, logger="ml_uspto.parse.joiner"):
         df, report = join_all(
@@ -209,6 +214,7 @@ def test_join_warns_on_t0_mismatch_proceedings_wins(empty_storage, caplog):
 
 
 def test_join_no_warning_when_t0_matches(empty_storage, caplog):
+    """Avoid mismatch warnings when petition and proceeding T0 agree."""
     with caplog.at_level(logging.WARNING, logger="ml_uspto.parse.joiner"):
         _, report = join_all(
             empty_storage,

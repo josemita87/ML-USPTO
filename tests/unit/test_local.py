@@ -14,6 +14,7 @@ def _storage(tmp_path: Path) -> LocalStorage:
 
 
 def test_object_round_trip(tmp_path: Path):
+    """Persist and reload a raw JSON object."""
     storage = _storage(tmp_path)
     payload = {"trialNumber": "IPR2026-00001", "rows": [{"a": 1}]}
     storage.save_object(Stage.PROCEEDINGS, "page_0", payload)
@@ -22,11 +23,13 @@ def test_object_round_trip(tmp_path: Path):
 
 
 def test_load_object_returns_none_when_missing(tmp_path: Path):
+    """Return None for missing raw objects."""
     storage = _storage(tmp_path)
     assert storage.load_object(Stage.PROCEEDINGS, "missing") is None
 
 
 def test_object_path_layout(tmp_path: Path):
+    """Write raw objects under the stage-named JSON path."""
     storage = _storage(tmp_path)
     storage.save_object(Stage.DOCUMENTS_PETITION_SCAN, "page_42", {"v": 1})
 
@@ -34,6 +37,7 @@ def test_object_path_layout(tmp_path: Path):
 
 
 def test_iter_objects_yields_in_sorted_order(tmp_path: Path):
+    """Iterate raw objects in stable key order."""
     storage = _storage(tmp_path)
     storage.save_object(Stage.PATENTS, "20000003", {"app": 3})
     storage.save_object(Stage.PATENTS, "20000001", {"app": 1})
@@ -45,11 +49,13 @@ def test_iter_objects_yields_in_sorted_order(tmp_path: Path):
 
 
 def test_iter_objects_empty_when_bucket_dir_missing(tmp_path: Path):
+    """Yield no objects when the stage directory does not exist."""
     storage = _storage(tmp_path)
     assert list(storage.iter_objects(Stage.PATENTS)) == []
 
 
 def test_save_object_overwrites_existing(tmp_path: Path):
+    """Overwrite an existing raw-object key."""
     storage = _storage(tmp_path)
     storage.save_object(Stage.PROCEEDINGS, "k", {"v": 1})
     storage.save_object(Stage.PROCEEDINGS, "k", {"v": 2})
@@ -58,6 +64,7 @@ def test_save_object_overwrites_existing(tmp_path: Path):
 
 
 def test_save_object_creates_parent_directories(tmp_path: Path):
+    """Create missing stage directories before writing raw objects."""
     nested = tmp_path / "does" / "not" / "exist"
     storage = LocalStorage(raw_root=nested, processed_root=tmp_path / "processed")
     storage.save_object(Stage.PROCEEDINGS, "k", {"v": 1})
@@ -66,6 +73,7 @@ def test_save_object_creates_parent_directories(tmp_path: Path):
 
 
 def test_frame_round_trip(tmp_path: Path):
+    """Persist and reload a processed parquet frame."""
     storage = _storage(tmp_path)
     df = pd.DataFrame({"trial_number": ["IPR2026-00001"], "n": [3]})
     storage.save_frame(df, Frame.TRIALS)
@@ -75,6 +83,7 @@ def test_frame_round_trip(tmp_path: Path):
 
 
 def test_frame_columns_projection(tmp_path: Path):
+    """Load only requested columns from a processed frame."""
     storage = _storage(tmp_path)
     df = pd.DataFrame({"a": [1, 2], "b": [3, 4]})
     storage.save_frame(df, Frame.TRIALS)

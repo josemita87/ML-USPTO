@@ -99,6 +99,7 @@ def join_all(
         joined.loc[mismatch_mask, "trial_number"],
         t0_doc_series[mismatch_mask],
         t0_series[mismatch_mask],
+        strict=False,
     ):
         logger.warning(
             "T₀ mismatch for %s: documents=%s proceedings=%s — proceedings wins",

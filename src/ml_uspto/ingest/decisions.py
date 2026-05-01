@@ -22,9 +22,10 @@ import logging
 
 import pandas as pd
 
-from ml_uspto.protocols.storage import Storage
-from ml_uspto.ingest.schemas.enums import FwdPdfCandidateColumn as Col, Stage
+from ml_uspto.ingest.schemas.enums import FwdPdfCandidateColumn as Col
+from ml_uspto.ingest.schemas.enums import Stage
 from ml_uspto.parse.labels import extract_outcome
+from ml_uspto.protocols.storage import Storage
 from ml_uspto.schemas.constants import (
     FWD_DECISION_TYPE_MARKER,
     FWD_ORIGINAL_MARKER,

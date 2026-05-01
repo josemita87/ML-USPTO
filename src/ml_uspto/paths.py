@@ -29,18 +29,21 @@ PATENT_EVENT_CODES_YAML = CONFIG_DIR / "patents" / "event_codes.yaml"
 
 
 def raw_dir() -> Path:
+    """Absolute path to the raw data directory (settings-derived)."""
     from ml_uspto.settings import get_settings
 
     return PROJECT_ROOT / get_settings().data.raw_dir
 
 
 def processed_dir() -> Path:
+    """Absolute path to the processed data directory (settings-derived)."""
     from ml_uspto.settings import get_settings
 
     return PROJECT_ROOT / get_settings().data.processed_dir
 
 
 def models_dir() -> Path:
+    """Absolute path to the models artifact directory (settings-derived)."""
     from ml_uspto.settings import get_settings
 
     return PROJECT_ROOT / get_settings().data.models_dir

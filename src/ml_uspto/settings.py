@@ -20,6 +20,8 @@ def _load_yaml() -> dict:
 
 
 class APISettings(BaseSettings):
+    """USPTO ODP API client knobs (key, base URL, pagination, retry backoff)."""
+
     model_config = SettingsConfigDict(
         env_file=paths.CREDENTIALS_ENV,
         env_file_encoding="utf-8",
@@ -35,15 +37,19 @@ class APISettings(BaseSettings):
 
 
 class DataSettings(BaseSettings):
+    """Project-relative data directory locations (raw / processed / models)."""
+
     raw_dir: Path = Path("data/raw")
     processed_dir: Path = Path("data/processed")
     models_dir: Path = Path("data/models")
 
 
 class StorageSettings(BaseSettings):
-    """Storage backend selector. Read from env (`ML_USPTO_STORAGE`,
-    `ML_USPTO_S3_BUCKET`); the Fargate task definition injects these,
-    laptop runs default to `local`."""
+    """Storage backend selector.
+
+    Read from env (`ML_USPTO_STORAGE`, `ML_USPTO_S3_BUCKET`); the Fargate
+    task definition injects these, laptop runs default to `local`.
+    """
 
     model_config = SettingsConfigDict(
         env_file=paths.CREDENTIALS_ENV,
@@ -57,18 +63,24 @@ class StorageSettings(BaseSettings):
 
 
 class FeatureSettings(BaseSettings):
+    """Feature-engineering toggles (date breakdown, TC encoding, text features)."""
+
     date_features: bool = True
     technology_center_encoding: str = "onehot"
     text_features: bool = False
 
 
 class ModelSettings(BaseSettings):
+    """Train/test split and CV knobs."""
+
     test_size: float = 0.2
     random_state: int = 42
     cv_folds: int = 5
 
 
 class Settings(BaseSettings):
+    """Top-level settings tree composed of the per-section sub-settings."""
+
     api: APISettings = Field(default_factory=APISettings)
     data: DataSettings = Field(default_factory=DataSettings)
     storage: StorageSettings = Field(default_factory=StorageSettings)
@@ -76,8 +88,10 @@ class Settings(BaseSettings):
     model: ModelSettings = Field(default_factory=ModelSettings)
 
     def __init__(self, **kwargs):
+        """Compose sub-settings from `config/settings.yaml` defaults and env overrides."""
         yaml_conf = _load_yaml()
-        # YAML provides defaults; env vars take precedence via pydantic on APISettings/StorageSettings
+        # YAML provides defaults; env vars take precedence via pydantic on
+        # APISettings/StorageSettings.
         api_vals = yaml_conf.get("api", {})
         data_vals = yaml_conf.get("data", {})
         feat_vals = yaml_conf.get("features", {})
