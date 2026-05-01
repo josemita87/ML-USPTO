@@ -119,20 +119,24 @@ def join_all(
     out of this function makes it cheap to unit-test on synthetic frames.
 
     Steps:
-      1. `build_labels(trials, decisions)` → labeled trials with `cancelled`,
-         excluding pending and dropping rows missing `petition_filing_date`
-         or `patent_number`.
-      2. Inner-join with `petitions` on `trial_number`. Labeled trials
+      1. `build_labels(trials, decisions)` → labeled trials with `cancelled`
+         (drops pending and label-unresolvable rows).
+      2. Drop rows missing `petition_filing_date` or `patent_number` —
+         required for the petitions merge and patent-feature aggregation
+         respectively. These are joiner-level pre-conditions, not label
+         concerns.
+      3. Inner-join with `petitions` on `trial_number`. Labeled trials
          without a petition row drop out implicitly.
-      3. Cross-check `petition_filing_date` (proceedings) against
+      4. Cross-check `petition_filing_date` (proceedings) against
          `petition_filing_date_doc` (documents) on each merged row;
          proceedings wins.
-      4. For each surviving (trial, app), look up the cached patent payload
+      5. For each surviving (trial, app), look up the cached patent payload
          and run `parse_patent_wrapper` → `cleanse_at_t0` →
          `extract_features` with the proceedings-side T₀.
     """
     n_trials_input = len(trials)
     labeled = build_labels(trials, decisions, storage=storage)
+    labeled = labeled.dropna(subset=["petition_filing_date", "patent_number"]).copy()
     n_trials_labeled = len(labeled)
 
     petition_cols = ["trial_number", "petition_pdf_uri", "petition_filing_date_doc"]

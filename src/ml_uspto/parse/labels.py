@@ -3,7 +3,8 @@
 Target = 1 iff the trial's *original* Final Written Decision held all
 challenged claims unpatentable. Everything else (institution denied,
 discretionary denial, settled, procedurally terminated, FWD where any claim
-survived) is 0. Trials still pending are excluded entirely.
+survived) is 0. Trials still pending are excluded — no terminal outcome,
+nothing to label.
 
 Per `prediction_scope.md` §3.1, only the original FWD is used as a label
 source; on-remand and rehearing variants are dropped at this stage. See
@@ -33,9 +34,13 @@ against `ALL_CLAIMS_UNPATENTABLE_OUTCOMES`) was removed in 2026-04 after
 zero matches in the 2,180-row cold-run; if USPTO ever populates that
 field, re-add it before layer 2 with one frozenset lookup.
 
-Trials whose label is still unresolved after all layers are dropped from
-the returned frame, alongside trials missing T₀ or `patent_number`. The
-caller (`parse.joiner`) gets a fully-labeled `cancelled` int column.
+Scope: this module builds *labels only*. It does not coerce dates,
+filter on `petition_filing_date`/`patent_number`, or normalize feature
+columns — those are joiner/feature-pipeline concerns. The IPR-only
+filter is enforced server-side by `fetch_proceedings`, so we trust
+upstream rather than re-filter here. Trials whose label is unresolvable
+after all three layers are dropped; everything else flows through to
+`parse.joiner` with a fully-labeled `cancelled` int column.
 """
 
 from __future__ import annotations
@@ -54,7 +59,6 @@ from ml_uspto.schemas.constants import (
     NON_FWD_LABEL_1_STATUSES,
     PENDING_STATUSES,
 )
-from ml_uspto.schemas.enums import TrialType
 from ml_uspto.schemas.patterns import FWD_PDF_OUTCOME_PATTERNS
 
 logger = logging.getLogger(__name__)
@@ -141,38 +145,28 @@ def build_labels(
     decisions: pd.DataFrame,
     storage: Storage | None = None,
 ) -> pd.DataFrame:
-    """Join proceedings + decisions, derive the binary `cancelled` label.
+    """Attach a `cancelled` int column to `proceedings`, drop unlabelable rows.
 
-    Returns one row per labeled trial (rows whose label couldn't be
-    resolved are dropped). When `storage` is given, the cached-text
-    fallback runs against `Stage.DECISION_TEXTS`; when None, only
-    title-based extraction is attempted.
+    Returns one row per labeled trial — same columns as `proceedings` plus
+    the FWD metadata merged in (`terminating_outcome`, `document_title`,
+    `document_identifier`) plus the `cancelled` int. Rows are dropped iff:
+      - status ∈ PENDING_STATUSES (no terminal outcome), or
+      - the three-layer cascade fails to resolve the label.
+
+    When `storage` is given, the cached-text fallback runs against
+    `Stage.DECISION_TEXTS`; when None, only status + title extraction
+    are attempted.
     """
     logger.info("Raw proceedings: %d", len(proceedings))
 
-    df = proceedings[proceedings["trial_type"] == TrialType.IPR].copy()
-    logger.info("After filtering to IPR: %d", len(df))
-
-    df = df[~df["trial_status"].isin(PENDING_STATUSES)].copy()
+    df = proceedings[~proceedings["trial_status"].isin(PENDING_STATUSES)].copy()
     logger.info("After dropping pending: %d", len(df))
-
-    date_cols = [
-        "petition_filing_date",
-        "accorded_filing_date",
-        "institution_decision_date",
-        "grant_date",
-        "latest_decision_date",
-        "termination_date",
-    ]
-    for col in date_cols:
-        if col in df.columns:
-            df[col] = pd.to_datetime(df[col], errors="coerce")
 
     terminating = _identify_terminating_fwd(decisions)
     df = df.merge(terminating, on="trial_number", how="left")
 
     # Nullable Int64 so unresolved rows stay distinguishable from real
-    # zeros until the final dropna
+    # zeros until the final dropna.
     df["cancelled"] = pd.array([pd.NA] * len(df), dtype="Int64")
 
     df.loc[df["trial_status"].isin(NON_FWD_LABEL_0_STATUSES), "cancelled"] = 0
@@ -204,13 +198,10 @@ def build_labels(
                 df.at[idx, "cancelled"] = label
                 n_text_resolved += 1
 
-    df = df.dropna(subset=["petition_filing_date", "patent_number"])
-
-    n_unresolved = int(df["cancelled"].isna().sum())
     n_total = len(df)
+    n_unresolved = int(df["cancelled"].isna().sum())
     df = df.dropna(subset=["cancelled"]).copy()
     df["cancelled"] = df["cancelled"].astype(int)
-    df["technology_center"] = df["technology_center"].astype(str).str.strip()
 
     logger.info(
         "Label resolution — status: %d, title: %d, text: %d/%d cached. "
