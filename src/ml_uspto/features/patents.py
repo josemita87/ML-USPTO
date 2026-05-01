@@ -47,6 +47,7 @@ def cleanse_at_t0(
     *,
     trial_number: str,
     petition_filing_date: date | datetime | str,
+    grant_date: date | datetime | str | None = None,
 ) -> PatentSnapshot:
     """Filter a raw `PatentFileWrapper` to the leakage-safe view as of T₀.
 
@@ -54,12 +55,18 @@ def cleanse_at_t0(
     have a more authoritative value (e.g. the joiner uses the
     proceedings-side application number) should pre-set
     `wrapper.application_number` rather than passing it as a kwarg.
+
+    `grant_date`, when provided, is the proceedings-side canonical grant
+    date (the wrapper carries `grantDate` too, but proceedings is the
+    source-of-truth for the join). Pinned on the snapshot so
+    `extract_features` can compute `days_grant_to_petition`.
     """
     t0 = to_date(petition_filing_date)
     if t0 is None:
         raise ValueError("petition_filing_date must be parseable")
     if not wrapper.application_number:
         raise ValueError("wrapper.application_number is required")
+    grant = to_date(grant_date) if grant_date is not None else None
 
     cleansed_events: list[PatentEvent] = []
     for event in wrapper.events:
@@ -81,6 +88,7 @@ def cleanse_at_t0(
         trial_number=trial_number,
         application_number=wrapper.application_number,
         petition_filing_date=t0,
+        grant_date=grant,
         cpc_classifications=list(wrapper.cpc_classifications),
         events=cleansed_events,
         assignments=cleansed_assignments,
@@ -101,12 +109,7 @@ def _normalize_assignee(name: str) -> str:
 
 
 def extract_features(snapshot: PatentSnapshot) -> PatentFeatures:
-    """Derive count + span features from a leakage-cleansed snapshot.
-
-    `days_grant_to_petition` is intentionally left None here — it depends
-    on the proceedings-side grant date, which the snapshot doesn't carry.
-    The stage-4 join populates it.
-    """
+    """Derive count + span features from a leakage-cleansed snapshot."""
     counts = {category: 0 for category in EventCategory if category is not EventCategory.TRIAL}
     event_dates: list[date] = []
     for event in snapshot.events:
@@ -139,6 +142,10 @@ def extract_features(snapshot: PatentSnapshot) -> PatentFeatures:
         (t0 - max(assignee_dates)).days if assignee_dates else None
     )
 
+    days_grant_to_petition = (
+        (t0 - snapshot.grant_date).days if snapshot.grant_date is not None else None
+    )
+
     return PatentFeatures(
         trial_number=snapshot.trial_number,
         application_number=snapshot.application_number,
@@ -156,6 +163,7 @@ def extract_features(snapshot: PatentSnapshot) -> PatentFeatures:
         n_assignments_pre_t0=len(assignee_dates),
         n_distinct_assignees_pre_t0=len(distinct_assignees),
         days_since_last_assignment=days_since_last_assignment,
+        days_grant_to_petition=days_grant_to_petition,
         n_parent_applications=len(snapshot.parent_continuity),
     )
 

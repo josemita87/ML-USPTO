@@ -58,16 +58,12 @@ def _aggregate_one(
     """Load cached patent payload for `application_number` and aggregate.
 
     Returns None if the payload is missing or cannot be aggregated.
-    Populates `days_grant_to_petition` from the proceedings-side grant_date
-    (the file wrapper has it as `grantDate` too, but proceedings-side is
-    canonical for the join).
+    `grant_date` (proceedings-side, canonical for the join) is threaded
+    through to `cleanse_at_t0` so `extract_features` can compute the
+    grant-to-petition span.
     """
     payload = storage.load_object(Stage.PATENTS, application_number)
     if payload is None:
-        return None
-    if "_fetch_error" in payload:
-        # Legacy quarantine stub from before quarantines were removed.
-        # Treat as missing; the next patents driver run will retry the fetch.
         return None
 
     try:
@@ -79,8 +75,9 @@ def _aggregate_one(
             wrapper,
             trial_number=trial_number,
             petition_filing_date=petition_t0,
+            grant_date=grant_date,
         )
-        features = extract_features(snapshot)
+        return extract_features(snapshot)
     except (KeyError, ValueError, TypeError) as exc:
         logger.warning(
             "Aggregate failed for trial=%s app=%s: %s",
@@ -89,11 +86,6 @@ def _aggregate_one(
             exc,
         )
         return None
-
-    if grant_date is not None:
-        days = (petition_t0 - grant_date).days
-        features = features.model_copy(update={"days_grant_to_petition": days})
-    return features
 
 
 def _column_to_dates(series: pd.Series) -> pd.Series:

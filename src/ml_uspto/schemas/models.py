@@ -321,9 +321,10 @@ class PatentSnapshot(BaseModel):
 
     Downstream feature extractors (count features, future text or
     embedding features) consume the snapshot and never re-implement
-    leakage discipline. The `petition_filing_date` field is kept on the
-    snapshot so consumers like `extract_features` can compute
-    `days_since_last_assignment` without re-passing T₀.
+    leakage discipline. `petition_filing_date` and `grant_date` are
+    pinned on the snapshot so `extract_features` can compute span
+    features (`days_since_last_assignment`, `days_grant_to_petition`)
+    without re-passing them.
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -331,6 +332,7 @@ class PatentSnapshot(BaseModel):
     trial_number: str
     application_number: str
     petition_filing_date: date
+    grant_date: date | None = None
 
     cpc_classifications: list[str] = Field(default_factory=list)
     events: list[PatentEvent] = Field(default_factory=list)
