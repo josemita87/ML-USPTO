@@ -56,21 +56,21 @@ def test_iter_objects_empty_when_bucket_dir_missing(storage: S3Storage):
 
 
 def test_blob_round_trip_and_has_blob(storage: S3Storage):
-    assert storage.has_blob(Stage.DECISION_PDFS, "doc1", "pdf") is False
-    storage.save_blob(Stage.DECISION_PDFS, "doc1", "pdf", b"%PDF-1.4 test")
-    assert storage.has_blob(Stage.DECISION_PDFS, "doc1", "pdf") is True
-    assert storage.load_blob(Stage.DECISION_PDFS, "doc1", "pdf") == b"%PDF-1.4 test"
+    assert storage.has_blob(Stage.DECISION_TEXTS, "doc1", "txt") is False
+    storage.save_blob(Stage.DECISION_TEXTS, "doc1", "txt", b"%PDF-1.4 test")
+    assert storage.has_blob(Stage.DECISION_TEXTS, "doc1", "txt") is True
+    assert storage.load_blob(Stage.DECISION_TEXTS, "doc1", "txt") == b"%PDF-1.4 test"
 
 
 def test_load_blob_returns_none_when_missing(storage: S3Storage):
-    assert storage.load_blob(Stage.DECISION_PDFS, "missing", "pdf") is None
+    assert storage.load_blob(Stage.DECISION_TEXTS, "missing", "txt") is None
 
 
 def test_iter_blob_keys_skips_other_extensions(storage: S3Storage):
-    storage.save_blob(Stage.DECISION_PDFS, "a", "pdf", b"x")
-    storage.save_blob(Stage.DECISION_PDFS, "b", "pdf", b"x")
-    storage.save_object(Stage.DECISION_PDFS, "c", {"meta": True})
-    keys = sorted(storage.iter_blob_keys(Stage.DECISION_PDFS, "pdf"))
+    storage.save_blob(Stage.DECISION_TEXTS, "a", "txt", b"x")
+    storage.save_blob(Stage.DECISION_TEXTS, "b", "txt", b"x")
+    storage.save_object(Stage.DECISION_TEXTS, "c", {"meta": True})
+    keys = sorted(storage.iter_blob_keys(Stage.DECISION_TEXTS, "txt"))
     assert keys == ["a", "b"]
 
 
@@ -91,7 +91,7 @@ def test_frame_columns_projection(storage: S3Storage):
 def test_key_layout_matches_local_storage_paths(storage: S3Storage):
     """Seed-upload invariant: S3 keys must match local FS layout exactly."""
     storage.save_object(Stage.DOCUMENTS_PETITION_SCAN, "page_42", {"v": 1})
-    storage.save_blob(Stage.DECISION_PDFS, "171252146", "pdf", b"x")
+    storage.save_blob(Stage.DECISION_TEXTS, "171252146", "txt", b"x")
     storage.save_frame(pd.DataFrame({"a": [1]}), Frame.TRIALS)
 
     listed = sorted(
@@ -100,7 +100,7 @@ def test_key_layout_matches_local_storage_paths(storage: S3Storage):
     )
     assert listed == [
         "processed/trials.parquet",
-        "raw/decision_pdfs/171252146.pdf",
+        "raw/decision_texts/171252146.txt",
         "raw/documents_petition_scan/page_42.json",
     ]
 

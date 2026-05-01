@@ -24,6 +24,10 @@ ml = [
     "seaborn>=0.13",
 ]
 dev = ["ruff", "pytest", "moto[s3]>=5.0"]
+infra = [
+    "aws-cdk-lib>=2.150",
+    "constructs>=10.0",
+]
 
 [build-system]
 requires = ["hatchling"]

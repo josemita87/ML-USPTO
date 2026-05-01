@@ -10,6 +10,7 @@ import os
 
 import aws_cdk as cdk
 
+from stacks.compute import ComputeStack
 from stacks.foundation import FoundationStack
 
 app = cdk.App()
@@ -19,6 +20,16 @@ env = cdk.Environment(
     region=os.environ.get("CDK_DEFAULT_REGION"),
 )
 
-FoundationStack(app, "MlUsptoFoundation", env=env)
+foundation = FoundationStack(app, "MlUsptoFoundation", env=env)
+
+ComputeStack(
+    app,
+    "MlUsptoCompute",
+    bucket=foundation.bucket,
+    repository=foundation.repository,
+    api_key_secret=foundation.api_key_secret,
+    task_role=foundation.task_role,
+    env=env,
+)
 
 app.synth()

@@ -40,6 +40,22 @@ class DataSettings(BaseSettings):
     models_dir: Path = Path("data/models")
 
 
+class StorageSettings(BaseSettings):
+    """Storage backend selector. Read from env (`ML_USPTO_STORAGE`,
+    `ML_USPTO_S3_BUCKET`); the Fargate task definition injects these,
+    laptop runs default to `local`."""
+
+    model_config = SettingsConfigDict(
+        env_file=paths.CREDENTIALS_ENV,
+        env_file_encoding="utf-8",
+        env_prefix="ML_USPTO_",
+        extra="ignore",
+    )
+
+    backend: str = "local"
+    s3_bucket: str = ""
+
+
 class FeatureSettings(BaseSettings):
     date_features: bool = True
     technology_center_encoding: str = "onehot"
@@ -55,12 +71,13 @@ class ModelSettings(BaseSettings):
 class Settings(BaseSettings):
     api: APISettings = Field(default_factory=APISettings)
     data: DataSettings = Field(default_factory=DataSettings)
+    storage: StorageSettings = Field(default_factory=StorageSettings)
     features: FeatureSettings = Field(default_factory=FeatureSettings)
     model: ModelSettings = Field(default_factory=ModelSettings)
 
     def __init__(self, **kwargs):
         yaml_conf = _load_yaml()
-        # YAML provides defaults; env vars take precedence via pydantic on APISettings
+        # YAML provides defaults; env vars take precedence via pydantic on APISettings/StorageSettings
         api_vals = yaml_conf.get("api", {})
         data_vals = yaml_conf.get("data", {})
         feat_vals = yaml_conf.get("features", {})
@@ -68,6 +85,7 @@ class Settings(BaseSettings):
         super().__init__(
             api=APISettings(**api_vals),
             data=DataSettings(**data_vals),
+            storage=StorageSettings(),
             features=FeatureSettings(**feat_vals),
             model=ModelSettings(**model_vals),
             **kwargs,
