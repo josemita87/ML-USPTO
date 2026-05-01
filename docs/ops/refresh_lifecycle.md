@@ -10,14 +10,13 @@ The mental model in one rule:
 
 > **API is source of truth → overwrite. We accumulate locally → append-only.**
 
-Anything ODP can re-serve gets re-derived each cycle. Anything we paid rate-limit budget for, or any state ODP doesn't carry (our retry bookkeeping), is accumulated.
+Anything ODP can re-serve gets re-derived each cycle. Anything we paid rate-limit budget for is accumulated.
 
 | Layer | Storage | Semantics | Why |
 |---|---|---|---|
 | Raw object cache | `<raw_root>/<Stage>/<key>.json` | Per-key overwrite (`save_object`) | API is source of truth; idempotent re-fetch picks up upstream mutations (status flips, reissued decisions) |
 | Tabular frames | `<processed_root>/<Frame>.parquet` | Whole-file overwrite (`save_frame`) | Re-flatten from raw is cheap; guarantees the frame matches current cache state |
 | FWD text blobs | `<raw_root>/decision_texts/<doc_id>.txt` | Append-only; gap detector skips cached keys. Text is extracted via pdfplumber at fetch-time; the binary PDF is never persisted | PDF-bucket is rate-limit-bound (~1.2M/wk); content is immutable once issued |
-| Retry bookkeeping | `Frame.DECISION_PDF_FAILURES` | Append-only, with `failed_at` TTL | Carries state ODP doesn't (our retry window) |
 
 `Frame.PATENT_QUARANTINE` follows the *frame* row (whole-file rewrite), not the accumulator row — it's re-derived from raw each cycle. Petition-side has no quarantine frame: trials with no pickable petition simply don't appear in `Frame.PETITIONS`, and the joiner drops them via inner-join.
 
@@ -67,7 +66,7 @@ Concurrency note: ODP enforces **burst = 1** per API key (see `rate_limits.md` �
 
 Where this is enforced:
 
-- **PDF gap detector** (`parse.decisions.enumerate_missing_fwd_pdfs`) — five-layer filter: non-IPR drop, status-resolvable drop, title-resolvable drop, cached-blob skip, recent-failure skip. A steady-state run with no new FWDs returns 0 candidates.
+- **PDF gap detector** (`ingest.decisions.enumerate_missing_fwd_pdfs`) — four-layer filter: non-IPR drop, status-resolvable drop, title-resolvable drop, cached-blob skip. A steady-state run with no new FWDs returns 0 candidates. Permanently-broken docs reappear each cycle (cheap at ~30–50 weekly candidates against a 1.2M/wk PDF budget); no failure tracking.
 - **Raw cache key-stability** — page numbers (proceedings/decisions) and application numbers (patents) are stable keys; re-fetch overwrites the same `<key>.json`.
 - **Frames** — re-flatten is a pure function of raw input. Stable raw → byte-identical frame.
 
@@ -79,12 +78,11 @@ If a stage produces output when nothing changed upstream, the invariant is broke
 
 | Knob | Where set | Default | When to tune |
 |---|---|---|---|
-| `--retry-after-days` | `drivers/run_ingest_decision_texts.py` | 7 | Lower if a transient outage clears within hours; raise (or hand-quarantine) if a doc is permanently broken (image-only PDF, 410) |
-| `--rate-sleep` | same driver | 2.0s | Tighten only if PDF-bucket budget allows; default keeps cold-run within bucket |
+| `--rate-sleep` | `drivers/run_ingest_decision_texts.py` | 2.0s | Tighten only if PDF-bucket budget allows; default keeps cold-run within bucket |
 | `--limit` | same driver | none | Use for pre-flight smoke tests (e.g. `--limit 50`) before a full backfill |
 | Petition picker quarantine | `config/petition_picker.yaml` | (existing) | When a trial's filings shape changes and the picker mis-classifies |
 
-Failures land in `Frame.DECISION_PDF_FAILURES` with `(document_identifier, reason, http_status, error, failed_at)`. The gap detector re-includes them once `failed_at + retry_after_days` has elapsed.
+Failures are logged inline and yield a `DecisionPdfFetchResult` with `bytes_written=None`. The next cron's gap detector picks the same doc up again — no retry-window state to maintain.
 
 ---
 
@@ -93,7 +91,7 @@ Failures land in `Frame.DECISION_PDF_FAILURES` with `(document_identifier, reaso
 | Run | Volume | Wall-clock | Notes |
 |---|---|---|---|
 | Cold-run FWD-PDF backfill | 1,089 PDFs | _TBD (in flight 2026-04-30)_ | First full run; numbers populated after completion |
-| Pre-flight `--limit 50` | 50 attempts | ~3 min | 48 success / 2 transient `RemoteDisconnected` (auto-retry via failures TTL) |
+| Pre-flight `--limit 50` | 50 attempts | ~3 min | 48 success / 2 transient `RemoteDisconnected` (auto-retried on next cron) |
 | Weekly delta (expected) | ~30–50 PDFs | <5 min | Estimate from FWD issuance cadence; revisit after first weekly run |
 
 ---
@@ -126,8 +124,8 @@ One-time. Not a recurring stage in the state machine. After the seed, weekly cro
 ## 7. Pointers
 
 - `src/ml_uspto/clients/local.py` — overwrite/append semantics live in `save_object`, `save_frame`, `save_blob`, `has_blob`.
-- `src/ml_uspto/parse/decisions.py::enumerate_missing_fwd_pdfs` — the delta detector.
-- `src/ml_uspto/ingest/fetch.py::fetch_decision_pdfs` — failure-append loop.
+- `src/ml_uspto/ingest/decisions.py::enumerate_missing_fwd_pdfs` — the delta detector.
+- `src/ml_uspto/ingest/fetch.py::fetch_decision_pdfs` — fetch loop (logs + skips failures).
 - `src/ml_uspto/schemas/enums.py::Frame`, `ingest/schemas/enums.py::Stage` — canonical key names.
 - `drivers/run_ingest_decision_texts.py` — driver flags + persistence on exit.
 - `docs/api/rate_limits.md` — bucket quotas this lifecycle spends against.

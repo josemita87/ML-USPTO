@@ -159,20 +159,24 @@ def build_labels(
     """
     logger.info("Raw proceedings: %d", len(proceedings))
 
+    # ── Drop pending: in-flight trials have no terminal outcome to label.
     df = proceedings[~proceedings["trial_status"].isin(PENDING_STATUSES)].copy()
     logger.info("After dropping pending: %d", len(df))
 
+    # ── Attach terminating-FWD metadata (left-join so non-FWD trials keep their row).
     terminating = _identify_terminating_fwd(decisions)
     df = df.merge(terminating, on="trial_number", how="left")
 
-    # Nullable Int64 so unresolved rows stay distinguishable from real
-    # zeros until the final dropna.
+    # ── Init cancelled as nullable Int64 so unresolved stays distinct from real 0
+    # all the way to the final dropna.
     df["cancelled"] = pd.array([pd.NA] * len(df), dtype="Int64")
 
+    # ── Layer 1: status-based — frozenset lookup against the 0/1 taxonomies.
     df.loc[df["trial_status"].isin(NON_FWD_LABEL_0_STATUSES), "cancelled"] = 0
     df.loc[df["trial_status"].isin(NON_FWD_LABEL_1_STATUSES), "cancelled"] = 1
     n_status = int(df["cancelled"].notna().sum())
 
+    # ── Layer 2: document_title regex on rows still unresolved.
     if "document_title" in df.columns:
         title_label = df["document_title"].fillna("").map(extract_outcome)
         needs_title = df["cancelled"].isna() & title_label.notna()
@@ -181,6 +185,7 @@ def build_labels(
     else:
         n_title = 0
 
+    # ── Layer 3: cached FWD-text fallback (skipped without storage).
     n_text_resolved = 0
     n_text_attempted = 0
     if storage is not None and "document_identifier" in df.columns:
@@ -198,6 +203,7 @@ def build_labels(
                 df.at[idx, "cancelled"] = label
                 n_text_resolved += 1
 
+    # ── Drop unresolved + cast to plain int for the downstream schema.
     n_total = len(df)
     n_unresolved = int(df["cancelled"].isna().sum())
     df = df.dropna(subset=["cancelled"]).copy()

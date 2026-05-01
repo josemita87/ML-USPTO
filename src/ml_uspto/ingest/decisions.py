@@ -5,28 +5,26 @@ cache and returns the candidate rows whose `cancelled` label is
 unresolvable by status + title, so a not-yet-cached FWD text blob is
 the only label source. Used by `drivers/run_ingest_decision_texts.py`.
 
+Lives in `ingest/` rather than `parse/` because it doesn't parse — it
+derives a next-fetch work list from current cache state. It consults
+`parse.labels.extract_outcome` to decide title-resolvability, but the
+output is a candidate frame for the fetcher, not parsed records.
+
 Per `docs/scope/prediction_scope.md` §3.1, this is restricted to
 *original* FWDs — on-remand and rehearing variants reference the
 remanded subset rather than the originally-challenged set, and would
 yield wrong labels.
-
-Outcome regex → label collapse lives in `parse.labels.extract_outcome`
-(label construction is a labels concern); PDF→text extraction is
-inlined at each fetch-time call site (`ingest.fetch.fetch_decision_pdfs`
-and the FWD-PDF drivers).
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
 from ml_uspto.protocols.storage import Storage
-from ml_uspto.ingest.schemas.enums import Stage
+from ml_uspto.ingest.schemas.enums import FwdPdfCandidateColumn as Col, Stage
 from ml_uspto.parse.labels import extract_outcome
-from ml_uspto.parse.schemas.enums import FwdPdfCandidateColumn as Col
 from ml_uspto.schemas.constants import (
     FWD_DECISION_TYPE_MARKER,
     FWD_ORIGINAL_MARKER,
@@ -69,33 +67,10 @@ def _iter_fwd_decisions(storage: Storage):
             }
 
 
-def _recently_failed(
-    failures: pd.DataFrame | None, retry_after_days: int
-) -> set[str]:
-    """doc_ids whose latest failure is within the retry-after window.
-
-    The fetch driver appends a row per failed download to
-    `Frame.DECISION_PDF_FAILURES`. The gap-detector treats those as
-    unavailable for `retry_after_days` so a single 5xx doesn't permanently
-    quarantine a PDF — but the same doc_id won't be retried every cron
-    cycle either.
-    """
-    if failures is None or failures.empty:
-        return set()
-    if Col.DOCUMENT_IDENTIFIER.value not in failures.columns or "failed_at" not in failures.columns:
-        return set()
-    cutoff = datetime.now(timezone.utc) - timedelta(days=retry_after_days)
-    failed_at = pd.to_datetime(failures["failed_at"], errors="coerce", utc=True)
-    recent = failures.loc[failed_at >= cutoff, Col.DOCUMENT_IDENTIFIER.value].dropna()
-    return {str(d).strip() for d in recent if str(d).strip()}
-
-
 def enumerate_missing_fwd_pdfs(
     storage: Storage,
     *,
     trials: pd.DataFrame,
-    failures: pd.DataFrame | None = None,
-    retry_after_days: int = 7,
 ) -> pd.DataFrame:
     """Return candidate rows whose label requires a not-yet-cached FWD text blob.
 
@@ -104,7 +79,10 @@ def enumerate_missing_fwd_pdfs(
       2. trial_status ∈ NON_FWD_LABEL_{0,1}_STATUSES — already 0/1.
       3. extract_outcome(document_title) is not None — title-resolvable.
       4. Text already cached at `Stage.DECISION_TEXTS / <doc_id>.txt`.
-      5. doc_id has a failure entry within `retry_after_days`.
+
+    A permanently-broken PDF will reappear on every cron cycle; at
+    weekly-delta scale (~30–50 candidates) that's negligible against the
+    1.2M/wk PDF bucket, so we don't track failures.
     """
     cols = [c.value for c in Col]
     candidates = pd.DataFrame(list(_iter_fwd_decisions(storage)), columns=cols)
@@ -135,19 +113,12 @@ def enumerate_missing_fwd_pdfs(
     after_cache = after_labels.loc[
         ~after_labels[Col.DOCUMENT_IDENTIFIER.value].astype(str).isin(cached_keys)
     ].copy()
-    n_after_cache = len(after_cache)
-
-    failed_recently = _recently_failed(failures, retry_after_days)
-    if failed_recently:
-        after_cache = after_cache.loc[
-            ~after_cache[Col.DOCUMENT_IDENTIFIER.value].isin(failed_recently)
-        ]
     n_final = len(after_cache)
 
     logger.info(
         "FWD-text gap detector: %d original-FWD rows -> %d unresolvable-by-status/title "
-        "-> %d not cached -> %d after retry-window (retry_after_days=%d)",
-        n_total, n_after_labels, n_after_cache, n_final, retry_after_days,
+        "-> %d not cached",
+        n_total, n_after_labels, n_final,
     )
     return after_cache.reset_index(drop=True)
 

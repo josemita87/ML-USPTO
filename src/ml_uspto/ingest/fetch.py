@@ -28,7 +28,6 @@ import io
 import logging
 import time
 from collections.abc import Callable, Iterable, Iterator
-from datetime import datetime, timezone
 from typing import Any
 
 import pandas as pd
@@ -38,12 +37,11 @@ import requests
 from ml_uspto.protocols.storage import Storage
 from ml_uspto.clients.uspto import USPTOClient
 from ml_uspto.ingest.schemas.constants import PETITION_SCAN_CATEGORIES, STAGE_RECORDS_KEY
-from ml_uspto.ingest.schemas.enums import Stage
+from ml_uspto.ingest.schemas.enums import FwdPdfCandidateColumn, Stage
 from ml_uspto.parse.flatten import flatten
-from ml_uspto.parse.schemas.enums import FwdPdfCandidateColumn, Parser
-from ml_uspto.schemas.enums import DecisionPdfFailureReason, Frame
+from ml_uspto.parse.schemas.enums import Parser
+from ml_uspto.schemas.enums import Frame
 from ml_uspto.schemas.models import (
-    DecisionPdfFailure,
     DecisionPdfFetchResult,
     PatentFetchResult,
 )
@@ -338,85 +336,50 @@ def fetch_decision_pdfs(
     `Stage.DECISION_TEXTS`, yield one outcome per row.
 
     `candidates` is the frame returned by
-    `parse.decisions.enumerate_missing_fwd_pdfs` — already filtered for
-    cache hits and recent failures, so every row is a fresh attempt.
-    Successful downloads run pdfplumber over the PDF bytes and land the
-    full opinion text at `Stage.DECISION_TEXTS / <doc_id>.txt`; the
-    binary is never persisted. Failures yield a `DecisionPdfFailure`
-    row for the caller to persist into `Frame.DECISION_PDF_FAILURES`.
+    `ingest.decisions.enumerate_missing_fwd_pdfs` — already filtered for
+    cache hits, so every row is a fresh attempt. Successful downloads
+    run pdfplumber over the PDF bytes and land the full opinion text at
+    `Stage.DECISION_TEXTS / <doc_id>.txt`; the binary is never persisted.
+    Failures are logged and yield a result with `bytes_written=None`;
+    the next cron's gap-detector will pick the same doc up again.
 
     `rate_sleep` is a fixed inter-request pause to stay well under the
     PDF-bucket budget (~1.2M requests/week — much tighter than metadata).
     The 429 backoff inside `USPTOClient.download_pdf` handles bursts; this
     sleep keeps the average rate down.
     """
-    trial_col = FwdPdfCandidateColumn.TRIAL_NUMBER.value
     doc_col = FwdPdfCandidateColumn.DOCUMENT_IDENTIFIER.value
     uri_col = FwdPdfCandidateColumn.FILE_DOWNLOAD_URI.value
-
-    def _fail(
-        doc_id: str,
-        trial_number: str,
-        uri: str,
-        reason: DecisionPdfFailureReason,
-        *,
-        http_status: int | None = None,
-        error: str | None = None,
-    ) -> DecisionPdfFetchResult:
-        return DecisionPdfFetchResult(
-            document_identifier=doc_id,
-            failure=DecisionPdfFailure(
-                trial_number=trial_number,
-                document_identifier=doc_id,
-                file_download_uri=uri,
-                reason=reason,
-                http_status=http_status,
-                error=error,
-                failed_at=datetime.now(timezone.utc),
-            ),
-        )
 
     for _, row in candidates.iterrows():
         doc_id = str(row[doc_col])
         uri = str(row[uri_col])
-        trial_number = str(row[trial_col])
         try:
             payload = client.download_pdf(uri)
         except requests.HTTPError as exc:
             # Errors are already slow + the 429 backoff inside
             # download_pdf already paced this attempt — don't sleep again.
             response = exc.response
-            yield _fail(
-                doc_id, trial_number, uri,
-                DecisionPdfFailureReason.HTTP_ERROR,
-                http_status=response.status_code if response is not None else None,
-                error=str(exc)[:500],
-            )
+            status = response.status_code if response is not None else None
+            logger.warning("FWD-PDF download failed (HTTP %s) doc=%s: %s", status, doc_id, exc)
+            yield DecisionPdfFetchResult(document_identifier=doc_id)
             continue
         except (requests.RequestException, RuntimeError) as exc:
-            yield _fail(
-                doc_id, trial_number, uri,
-                DecisionPdfFailureReason.REQUEST_ERROR,
-                error=str(exc)[:500],
-            )
+            logger.warning("FWD-PDF request error doc=%s: %s", doc_id, exc)
+            yield DecisionPdfFetchResult(document_identifier=doc_id)
             continue
 
         if not payload:
-            yield _fail(
-                doc_id, trial_number, uri,
-                DecisionPdfFailureReason.EMPTY_RESPONSE,
-            )
+            logger.warning("FWD-PDF empty response doc=%s", doc_id)
+            yield DecisionPdfFetchResult(document_identifier=doc_id)
             continue
 
         try:
             with pdfplumber.open(io.BytesIO(payload)) as pdf:
                 text = "\n".join((page.extract_text() or "") for page in pdf.pages)
         except Exception as exc:  # noqa: BLE001 — pdfplumber raises a zoo of types
-            yield _fail(
-                doc_id, trial_number, uri,
-                DecisionPdfFailureReason.REQUEST_ERROR,
-                error=f"pdfplumber: {type(exc).__name__}: {exc}"[:500],
-            )
+            logger.warning("FWD-PDF pdfplumber error doc=%s: %s: %s", doc_id, type(exc).__name__, exc)
+            yield DecisionPdfFetchResult(document_identifier=doc_id)
             time.sleep(rate_sleep)
             continue
 

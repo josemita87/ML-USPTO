@@ -1,4 +1,3 @@
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -6,7 +5,7 @@ import pytest
 
 from ml_uspto.clients.storage.local import LocalStorage
 from ml_uspto.ingest.schemas.enums import Stage
-from ml_uspto.parse.decisions import enumerate_missing_fwd_pdfs
+from ml_uspto.ingest.decisions import enumerate_missing_fwd_pdfs
 
 
 def _decisions_page() -> dict:
@@ -112,31 +111,6 @@ def test_enumerate_excludes_non_ipr(seeded_storage):
     trials.loc[trials["trial_number"] == "IPR2022-NEEDS_PDF", "trial_type"] = "PGR"
     out = enumerate_missing_fwd_pdfs(seeded_storage, trials=trials)
     assert out.empty
-
-
-def test_enumerate_skips_recent_failures(seeded_storage):
-    failures = pd.DataFrame(
-        [{
-            "document_identifier": "222",
-            "failed_at": datetime.now(timezone.utc).isoformat(),
-            "http_status": 503,
-        }]
-    )
-    out = enumerate_missing_fwd_pdfs(
-        seeded_storage, trials=_trials_frame(), failures=failures, retry_after_days=7
-    )
-    assert out.empty
-
-
-def test_enumerate_retries_old_failures(seeded_storage):
-    old = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
-    failures = pd.DataFrame(
-        [{"document_identifier": "222", "failed_at": old, "http_status": 503}]
-    )
-    out = enumerate_missing_fwd_pdfs(
-        seeded_storage, trials=_trials_frame(), failures=failures, retry_after_days=7
-    )
-    assert list(out["trial_number"]) == ["IPR2022-NEEDS_PDF"]
 
 
 def test_enumerate_handles_empty_decisions_cache(tmp_path: Path):

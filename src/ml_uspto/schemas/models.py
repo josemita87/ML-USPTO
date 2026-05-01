@@ -11,10 +11,6 @@ from typing import Any, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from ml_uspto.schemas.enums import (
-    DecisionPdfFailureReason,
-)
-
 # ---------------------------------------------------------------------------
 # /trials/proceedings
 # ---------------------------------------------------------------------------
@@ -167,15 +163,6 @@ class ModelMetrics(BaseModel):
     classification_report: dict[str, Any]
 
 
-class AdmissibilityPartition(BaseModel):
-    """Outcome of partitioning a trial directory's documents by T0 admissibility."""
-
-    t0: str
-    n_admissible: int
-    n_excluded: int
-    pdfs_moved: int
-
-
 # ---------------------------------------------------------------------------
 # Ingestion pipeline seams (see docs/plans/2026-04-29-ingestion-pipeline.md §6)
 # ---------------------------------------------------------------------------
@@ -222,39 +209,20 @@ class PatentFetchResult(BaseModel):
     raw_record: dict[str, Any] | None = None
 
 
-class DecisionPdfFailure(BaseModel):
-    """One failed FWD-PDF download. Persisted as a row in
-    `Frame.DECISION_PDF_FAILURES`; the gap-detector skips doc_ids whose
-    latest failure is within `--retry-after-days` so transient 5xxs don't
-    permanently quarantine but a doc isn't retried every cron either.
-    """
-
-    model_config = ConfigDict(extra="ignore")
-
-    trial_number: str
-    document_identifier: str
-    file_download_uri: str
-    reason: DecisionPdfFailureReason
-    http_status: int | None = None
-    error: str | None = None
-    failed_at: datetime
-
-
 class DecisionPdfFetchResult(BaseModel):
     """One FWD download outcome emitted by `ingest.fetch.fetch_decision_pdfs`.
 
-    On success, `bytes_written` is the size of the extracted text saved
-    under `Stage.DECISION_TEXTS / <doc_id>.txt` (the binary PDF is never
-    persisted); on failure, `failure` carries the diagnostic row to
-    append to `Frame.DECISION_PDF_FAILURES`. Mutually exclusive —
-    exactly one of the two is populated.
+    `bytes_written` is the size of the extracted text saved under
+    `Stage.DECISION_TEXTS / <doc_id>.txt` on success, and `None` on
+    failure (the binary PDF is never persisted). Failures are logged
+    inline; a permanently-broken doc just reappears on the next cron's
+    gap-detector pass — cheap at ~30–50 weekly deltas.
     """
 
     model_config = ConfigDict(extra="ignore")
 
     document_identifier: str
     bytes_written: int | None = None
-    failure: DecisionPdfFailure | None = None
 
 
 class PatentEvent(BaseModel):

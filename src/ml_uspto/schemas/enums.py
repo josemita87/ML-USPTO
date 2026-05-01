@@ -32,16 +32,6 @@ class TrialOutcome(StrEnum):
     ALL_CHALLENGED_CLAIMS_UNPATENTABLE = "All Challenged Claims Unpatentable"
 
 
-class DecisionPdfFailureReason(StrEnum):
-    """Why an FWD PDF download failed. Persisted in `Frame.DECISION_PDF_FAILURES`
-    rows so the gap-detector can quarantine retryably (see
-    `parse.decisions._recently_failed`)."""
-
-    HTTP_ERROR = "http_error"
-    REQUEST_ERROR = "request_error"
-    EMPTY_RESPONSE = "empty_response"
-
-
 class Frame(StrEnum):
     """Stable keys for the project's tabular outputs.
 
@@ -55,7 +45,6 @@ class Frame(StrEnum):
     DECISIONS = "decisions"
     PETITIONS = "petitions"
     PATENTS = "patents"
-    DECISION_PDF_FAILURES = "decision_pdf_failures"
     JOINED_TRIALS = "joined_trials"
 
 
