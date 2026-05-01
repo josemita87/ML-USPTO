@@ -1,8 +1,8 @@
 """Subpackage-local enums for `ml_uspto.features`.
 
-Used by `features.patent_aggregator` to categorize patent file-wrapper
-event codes — `EventCategory` is the closed set of families the
-aggregator counts (the `n_<cat>_pre_t0` columns of `PatentFeatures`).
+`EventCategory` is the closed set of patent file-wrapper event families
+that `features.transforms.build_features` aggregates into per-trial count
+columns (`n_<cat>_pre_t0`).
 """
 
 from enum import StrEnum

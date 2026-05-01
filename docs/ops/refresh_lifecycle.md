@@ -18,7 +18,7 @@ Anything ODP can re-serve gets re-derived each cycle. Anything we paid rate-limi
 | Tabular frames | `<processed_root>/<Frame>.parquet` | Whole-file overwrite (`save_frame`) | Re-flatten from raw is cheap; guarantees the frame matches current cache state |
 | FWD text blobs | `<raw_root>/decision_texts/<doc_id>.txt` | Append-only; gap detector skips cached keys. Text is extracted via pdfplumber at fetch-time; the binary PDF is never persisted | PDF-bucket is rate-limit-bound (~1.2M/wk); content is immutable once issued |
 
-`Frame.PATENT_QUARANTINE` follows the *frame* row (whole-file rewrite), not the accumulator row — it's re-derived from raw each cycle. Petition-side has no quarantine frame: trials with no pickable petition simply don't appear in `Frame.PETITIONS`, and the joiner drops them via inner-join.
+There are no quarantine frames. Patents that fail aggregation are dropped silently from `Frame.PATENTS`; trials with no pickable petition simply don't appear in `Frame.PETITIONS`, and the joiner drops them via inner-join.
 
 ---
 

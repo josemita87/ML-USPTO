@@ -109,9 +109,9 @@ The full event-code dictionary is large (the probed patent alone has 47 distinct
 
 1. **From the proceedings frame**, build the unique set `apps = {row.applicationNumberText for row in proceedings}` (~10–13K applications across ~18K IPRs after joinder dedup).
 2. **For each uncached batch of applications**, `POST /applications/search` filtered by `applicationNumberText`. Cache each returned wrapper under `data/raw/patents/{app}.json`. Rate-limit bucket: same `/api/v1/patent/*` family as proceedings.
-3. **Flatten via `parse.flatten.flatten(records, "patents")`** with a new `config/parsers/patents.yaml` mapping the static paths from the table above. The parser config does *not* try to flatten the dated bags directly — those go through a dedicated aggregator step.
-4. **Aggregate the dated bags** in a second pass, parameterized by `petitionFilingDate` (joined in from proceedings on `applicationNumberText`). Output one `PatentFeatures` row per `(trialNumber, applicationNumberText)`. T₀-filter is applied here, once, in code that lives next to the parser.
-5. **Schema**: one `Patent` model in `schemas/models.py` for the raw flatten + a `PatentFeatures` model for the aggregations. Two layers because the raw flatten still has variable-length bags; the feature row is one fixed shape.
+3. **Flatten via `parse.patents.to_flat_record(payload)`** to produce one wide row per application. Static paths land as scalars; the dated bags become parallel-array columns (`event_codes`/`event_dates`, `assignment_received_dates`/`assignment_recorded_dates`/`assignees_per_assignment` as `list[list[str]]`). The declarative engine in `parse.flatten` can't express the parallel-array shape, so this surface bypasses it (see `CLAUDE.md` hard rule #2 carve-out).
+4. **Join into the trial frame** in `parse.joiner.join_all` — left-join on `application_number` so failed fetches survive with NaN. The joined frame is fat (proceedings + decisions + petitions + patent parallel arrays).
+5. **Apply T₀ filter + feature engineering** downstream in `features.transforms.build_features` — single pipeline takes the joined frame and produces a model-ready matrix. T₀-filter on `event_dates`/`assignment_received_dates` runs here, once.
 
 ## Cost model
 

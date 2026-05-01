@@ -6,7 +6,6 @@ import pandas as pd
 import pytest
 
 from ml_uspto.clients.storage.local import LocalStorage
-from ml_uspto.ingest.schemas.enums import Stage
 from ml_uspto.parse.joiner import join_all
 
 
@@ -54,10 +53,6 @@ def _trials_frame() -> pd.DataFrame:
 
 
 def _decisions_frame() -> pd.DataFrame:
-    # `document_title` carries the granular outcome empirically; the
-    # bare API field `trial_outcome` is always "Final Written Decision"
-    # (see config/labels.yaml). The title-regex layer in
-    # parse.labels picks this up.
     return pd.DataFrame(
         [
             {
@@ -93,41 +88,50 @@ def _petitions_frame(fwd_doc_date: date = date(2022, 5, 23)) -> pd.DataFrame:
     )
 
 
+def _patents_frame() -> pd.DataFrame:
+    """Two patents matching the two trials' application_numbers. Carries
+    parallel-array cols for events/assignments, mirroring the shape that
+    `parse.patents.to_flat_record` produces."""
+    return pd.DataFrame(
+        [
+            {
+                "application_number": "14000001",
+                "filing_date": date(2017, 1, 1),
+                "cpc_codes": ["G06F 17/00"],
+                "event_codes": ["CTNF"],
+                "event_dates": [date(2017, 6, 1)],
+                "assignment_received_dates": [],
+                "assignment_recorded_dates": [],
+                "assignees_per_assignment": [],
+                "parent_app_numbers": [],
+            },
+            {
+                "application_number": "14000002",
+                "filing_date": date(2016, 1, 1),
+                "cpc_codes": ["H04L 9/00"],
+                "event_codes": ["CTNF", "WIDS"],
+                "event_dates": [date(2016, 6, 1), date(2017, 8, 1)],
+                "assignment_received_dates": [],
+                "assignment_recorded_dates": [],
+                "assignees_per_assignment": [],
+                "parent_app_numbers": [],
+            },
+        ]
+    )
+
+
 @pytest.fixture
-def storage_with_payloads(tmp_path: Path) -> LocalStorage:
-    """LocalStorage seeded with two patent payloads under bucket=Stage.PATENTS."""
-    storage = LocalStorage(raw_root=tmp_path / "raw", processed_root=tmp_path / "processed")
-    payloads: dict[str, dict] = {
-        "14000001": {
-            "applicationMetaData": {"cpcClassificationBag": ["G06F 17/00"]},
-            "eventDataBag": [
-                {"eventCode": "CTNF", "eventDate": "2017-01-01"},
-                {"eventCode": "TRIALFWD", "eventDate": "2024-01-01"},
-            ],
-        },
-        "14000002": {
-            "applicationMetaData": {"cpcClassificationBag": ["H04L 9/00"]},
-            "eventDataBag": [
-                {"eventCode": "CTNF", "eventDate": "2016-06-01"},
-                {"eventCode": "WIDS", "eventDate": "2017-08-01"},
-            ],
-        },
-    }
-    for app, record in payloads.items():
-        storage.save_object(Stage.PATENTS, app, {"patentFileWrapperDataBag": [record]})
-    return storage
+def empty_storage(tmp_path: Path) -> LocalStorage:
+    return LocalStorage(raw_root=tmp_path / "raw", processed_root=tmp_path / "processed")
 
 
-def test_join_all_drops_labeled_trials_without_petition_row(storage_with_payloads):
-    """A labeled trial with no row in `petitions` is excluded from the
-    joined frame via inner-join. `n_trials_labeled − n_joined` captures
-    the count.
-    """
+def test_join_all_drops_labeled_trials_without_petition_row(empty_storage):
     df, report = join_all(
-        storage_with_payloads,
+        empty_storage,
         trials=_trials_frame(),
         decisions=_decisions_frame(),
         petitions=_petitions_frame(),
+        patents=_patents_frame(),
     )
 
     assert set(df["trial_number"]) == {"IPR2022-LABEL_BY_STATUS_0", "IPR2022-LABEL_BY_FWD_1"}
@@ -136,12 +140,13 @@ def test_join_all_drops_labeled_trials_without_petition_row(storage_with_payload
     assert report.n_trials_labeled - report.n_joined == 1
 
 
-def test_join_all_assigns_correct_labels(storage_with_payloads):
+def test_join_all_assigns_correct_labels(empty_storage):
     df, _ = join_all(
-        storage_with_payloads,
+        empty_storage,
         trials=_trials_frame(),
         decisions=_decisions_frame(),
         petitions=_petitions_frame(),
+        patents=_patents_frame(),
     )
 
     by_trial = df.set_index("trial_number")["cancelled"].to_dict()
@@ -149,69 +154,68 @@ def test_join_all_assigns_correct_labels(storage_with_payloads):
     assert by_trial["IPR2022-LABEL_BY_FWD_1"] == 1
 
 
-def test_join_all_aggregates_patent_features_with_t0(storage_with_payloads):
-    df, report = join_all(
-        storage_with_payloads,
+def test_join_all_attaches_patent_arrays(empty_storage):
+    """Joined frame carries the patent parallel-array cols from the
+    patents merge, ready for the features stage to filter/aggregate.
+    """
+    df, _ = join_all(
+        empty_storage,
         trials=_trials_frame(),
         decisions=_decisions_frame(),
         petitions=_petitions_frame(),
+        patents=_patents_frame(),
     )
-
     by_trial = df.set_index("trial_number")
     fwd = by_trial.loc["IPR2022-LABEL_BY_FWD_1"]
-    # Both events are pre-T0 (2022-05-23) and non-banned.
-    assert fwd["n_events_pre_t0"] == 2
-    assert fwd["n_ex_pre_t0"] == 1  # CTNF
-    assert fwd["n_aa_pre_t0"] == 1  # WIDS
-    assert fwd["cpc_section"] == "H"
-    # days_grant_to_petition = (2022-05-23) - (2017-01-01) = 1968 days.
-    assert fwd["days_grant_to_petition"] == (date(2022, 5, 23) - date(2017, 1, 1)).days
-    assert report.n_with_patent_features == 2
+    assert list(fwd["event_codes"]) == ["CTNF", "WIDS"]
+    assert list(fwd["cpc_codes"]) == ["H04L 9/00"]
 
 
-def test_join_all_handles_missing_cache(tmp_path: Path):
-    empty = LocalStorage(raw_root=tmp_path / "raw", processed_root=tmp_path / "processed")
+def test_join_all_left_joins_missing_patents(empty_storage):
+    """Trials whose patent isn't in `patents.parquet` (fetch failed)
+    survive the join with NaN for every patent column."""
+    patents_partial = _patents_frame().iloc[:1]  # only IPR2022-LABEL_BY_STATUS_0's app
     df, report = join_all(
-        empty,
+        empty_storage,
         trials=_trials_frame(),
         decisions=_decisions_frame(),
         petitions=_petitions_frame(),
+        patents=patents_partial,
+    )
+    assert report.n_joined == 2
+    fwd = df.set_index("trial_number").loc["IPR2022-LABEL_BY_FWD_1"]
+    assert pd.isna(fwd["filing_date"])  # patent scalars NaN
+    # list cols come back as NaN/None for missing left-join rows
+    assert fwd.get("event_codes") is None or (
+        isinstance(fwd["event_codes"], float) and pd.isna(fwd["event_codes"])
     )
 
-    assert report.n_with_patent_features == 0
-    assert report.n_joined - report.n_with_patent_features == len(df)
-    assert df["n_events_pre_t0"].isna().all()
 
-
-def test_join_warns_on_t0_mismatch_proceedings_wins(storage_with_payloads, caplog):
-    """When `petition_filing_date` (proceedings) != `petition_filing_date_doc`
-    (documents), the joiner logs a warning and the proceedings-side T₀
-    drives the patent aggregation.
-    """
-    # Diverges from proceedings (2022-05-23) by 5 days.
+def test_join_warns_on_t0_mismatch_proceedings_wins(empty_storage, caplog):
     petitions = _petitions_frame(fwd_doc_date=date(2022, 5, 28))
     with caplog.at_level(logging.WARNING, logger="ml_uspto.parse.joiner"):
         df, report = join_all(
-            storage_with_payloads,
+            empty_storage,
             trials=_trials_frame(),
             decisions=_decisions_frame(),
             petitions=petitions,
+            patents=_patents_frame(),
         )
 
     assert report.n_petition_t0_mismatch == 1
     assert any("T₀ mismatch" in m for m in caplog.messages)
-    # Proceedings-side T₀ drives the days_grant_to_petition arithmetic.
     fwd = df.set_index("trial_number").loc["IPR2022-LABEL_BY_FWD_1"]
-    assert fwd["days_grant_to_petition"] == (date(2022, 5, 23) - date(2017, 1, 1)).days
+    assert fwd["petition_filing_date"] == date(2022, 5, 23)
 
 
-def test_join_no_warning_when_t0_matches(storage_with_payloads, caplog):
+def test_join_no_warning_when_t0_matches(empty_storage, caplog):
     with caplog.at_level(logging.WARNING, logger="ml_uspto.parse.joiner"):
         _, report = join_all(
-            storage_with_payloads,
+            empty_storage,
             trials=_trials_frame(),
             decisions=_decisions_frame(),
             petitions=_petitions_frame(),
+            patents=_patents_frame(),
         )
     assert report.n_petition_t0_mismatch == 0
     assert not any("T₀ mismatch" in m for m in caplog.messages)

@@ -46,6 +46,7 @@ class Frame(StrEnum):
     PETITIONS = "petitions"
     PATENTS = "patents"
     JOINED_TRIALS = "joined_trials"
+    FEATURES = "features"
 
 
 class DocumentCategory(StrEnum):

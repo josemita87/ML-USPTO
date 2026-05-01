@@ -4,11 +4,12 @@ Two groups:
   - Mechanical column lists for `transforms.build_features` —
     `PATENT_COUNT_FEATURES` (NaN ⇒ no wrapper, fill 0) and
     `PATENT_NULLABLE_NUMERIC` (NaN carries meaning, paired indicator).
-  - Patent event-code taxonomy for `features.patents` —
-    `EVENT_CODE_CATEGORIES`, `BANNED_EVENT_CATEGORIES`,
-    `BANNED_EVENT_PREFIXES`, loaded from
-    `config/patents/event_codes.yaml`. The taxonomy is domain-revisable
-    (a non-engineer might want to retag a code) so it lives in YAML.
+  - Patent event-code taxonomy used by the T₀-leakage filter inside
+    `transforms.build_features`: `EVENT_CODE_CATEGORIES` (code →
+    category map), `TRIAL_EVENT_PREFIXES` (codes that are TRIAL by
+    prefix, e.g. `TRIALPET`/`TRIALFWD`), `BANNED_EVENT_CATEGORIES`
+    (categories filtered out at T₀ because they leak label
+    information). All loaded from `config/patents/event_codes.yaml`.
 """
 
 from functools import lru_cache
@@ -65,7 +66,7 @@ EVENT_CODE_CATEGORIES: dict[str, EventCategory] = {
 BANNED_EVENT_CATEGORIES: frozenset[EventCategory] = frozenset(
     EventCategory(category) for category in _event_cfg["banned_categories"]
 )
-BANNED_EVENT_PREFIXES: tuple[str, ...] = tuple(_event_cfg.get("banned_prefixes", []))
+TRIAL_EVENT_PREFIXES: tuple[str, ...] = tuple(_event_cfg.get("banned_prefixes", []))
 
 
 __all__ = [
@@ -73,5 +74,5 @@ __all__ = [
     "PATENT_NULLABLE_NUMERIC",
     "EVENT_CODE_CATEGORIES",
     "BANNED_EVENT_CATEGORIES",
-    "BANNED_EVENT_PREFIXES",
+    "TRIAL_EVENT_PREFIXES",
 ]

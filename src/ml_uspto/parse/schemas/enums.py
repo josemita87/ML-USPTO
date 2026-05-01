@@ -12,13 +12,3 @@ class Parser(StrEnum):
 
     PROCEEDINGS = "proceedings"
     DECISIONS = "decisions"
-    DOCUMENTS = "documents"
-    PATENTS = "patents"
-
-
-class ParserTransform(StrEnum):
-    """Generic transforms supported by declarative parser column specs."""
-
-    COUNT = "count"
-    UNIQUE_LIST = "unique_list"
-    YN_BOOL = "yn_bool"

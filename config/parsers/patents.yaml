@@ -50,59 +50,9 @@ decisions:
     # doesn't encode the granular outcome.
     document_identifier: documentData.documentIdentifier
 
-# Documents/search rows. Only `documentData.*` paths are mapped here.
-# `trialMetaData.*` is intentionally absent — on a documents row it is the
-# trial header denormalized at indexer time and lags the proceedings side
-# by minutes-to-months (see docs/api/proceedings.md "What we observed"),
-# so any feature pulled from it risks silent post-T₀ contamination. The
-# YAML statically enforces the source-of-truth rule from proceedings.md
-# §"Field-by-field paths".
-documents:
-  columns:
-    trial_number: trialNumber
-
-    document_number: documentData.documentNumber
-    document_title: documentData.documentTitleText
-    document_name: documentData.documentName
-    document_category: documentData.documentCategory
-    document_filing_date: documentData.documentFilingDate
-    filing_party: documentData.filingPartyCategory
-    file_download_uri: documentData.fileDownloadURI
-
-# Static-only application file-wrapper fields from GET /applications/{appNum}.
-# Dated bags (`eventDataBag`, `assignmentBag`, `parentContinuityBag`) are not
-# flattened here; `parse.patent_aggregator.aggregate_patent` owns the T0 filter.
-# Status-as-of-now fields such as `applicationStatusCode` are intentionally absent.
-patents:
-  columns:
-    application_number: applicationNumberText
-
-    # Bibliographic / static
-    filing_date: applicationMetaData.filingDate
-    effective_filing_date: applicationMetaData.effectiveFilingDate
-    application_type: applicationMetaData.applicationTypeCode
-    entity_size: applicationMetaData.entityStatusData.businessEntityStatusCategory
-    first_inventor_to_file:
-      path: applicationMetaData.firstInventorToFileIndicator
-      transform: yn_bool
-    national_stage:
-      path: applicationMetaData.nationalStageIndicator
-      transform: yn_bool
-    n_inventors:
-      path: applicationMetaData.inventorBag
-      transform: count
-    inventor_country_codes:
-      path: applicationMetaData.inventorBag[].correspondenceAddressBag[].countryCode
-      transform: unique_list
-    cpc_codes: applicationMetaData.cpcClassificationBag
-    uspc_class_subclass: applicationMetaData.uspcSymbolText
-    n_attorneys_of_record:
-      path: recordAttorney.attorneyBag
-      transform: count
-
-    # Patent term adjustment aggregates are frozen at grant.
-    pta_a_delay: patentTermAdjustmentData.aDelayQuantity
-    pta_b_delay: patentTermAdjustmentData.bDelayQuantity
-    pta_c_delay: patentTermAdjustmentData.cDelayQuantity
-    pta_total: patentTermAdjustmentData.adjustmentTotalQuantity
-    pta_applicant_delay: patentTermAdjustmentData.applicantDayDelayQuantity
+# Patents (/applications) flatten lives in `parse.patents.to_flat_record`,
+# not here: it produces parallel-array columns (event_codes/event_dates,
+# assignees_per_assignment as list[list[str]]) that the declarative engine
+# can't express. Documents/search rows aren't flattened to a frame —
+# petition-row picking happens directly off raw records in
+# parse.petition_assembler.

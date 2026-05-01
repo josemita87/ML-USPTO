@@ -261,14 +261,16 @@ class ParentApplication(BaseModel):
 
 
 class PatentFileWrapper(BaseModel):
-    """**Contract 1** — typed view of a raw `/applications/{appNum}` payload.
+    """Typed view of a raw `/applications/{appNum}` payload.
 
-    T₀-naïve, no trial context. Construct via
-    `parse.patents.parse_patent_wrapper`, which unwraps the
-    `patentFileWrapperDataBag` envelope and normalizes the
+    Constructed via `parse.patents.parse_patent_wrapper`, which unwraps
+    the `patentFileWrapperDataBag` envelope and normalizes the
     inconsistently-typed `cpcClassificationBag` entries to a flat
     `list[str]` before validation. Consumed by
-    `features.patents.cleanse_at_t0` to build `PatentSnapshot`.
+    `parse.patents.to_flat_record` to assemble the per-app row that
+    lands in `patents.parquet` (scalars + parallel-array cols). T₀
+    leakage discipline lives downstream in
+    `features.transforms.build_features`.
     """
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
@@ -282,111 +284,6 @@ class PatentFileWrapper(BaseModel):
     )
 
 
-class PatentSnapshot(BaseModel):
-    """**Contract 2** — T₀-cleansed per-(trial, application) view of a patent.
-
-    Produced by `features.patents.cleanse_at_t0(wrapper, trial_number,
-    petition_filing_date, ...)`. Carries the same nested bag types as
-    `PatentFileWrapper` but with leakage already removed:
-
-      - `events`: drops rows with `event_date >= T₀` AND drops banned
-        categories (`TRIAL*` event codes — the label leaking through).
-      - `assignments`: drops rows whose received/recorded date is `>= T₀`
-        (or has no usable date).
-      - `cpc_classifications`, `parent_continuity`: undated, passed through.
-
-    Downstream feature extractors (count features, future text or
-    embedding features) consume the snapshot and never re-implement
-    leakage discipline. `petition_filing_date` and `grant_date` are
-    pinned on the snapshot so `extract_features` can compute span
-    features (`days_since_last_assignment`, `days_grant_to_petition`)
-    without re-passing them.
-    """
-
-    model_config = ConfigDict(extra="ignore")
-
-    trial_number: str
-    application_number: str
-    petition_filing_date: date
-    grant_date: date | None = None
-
-    cpc_classifications: list[str] = Field(default_factory=list)
-    events: list[PatentEvent] = Field(default_factory=list)
-    assignments: list[PatentAssignment] = Field(default_factory=list)
-    parent_continuity: list[ParentApplication] = Field(default_factory=list)
-
-
-class PatentFeatures(BaseModel):
-    """Numerical features per (trial, application), derived from a
-    `PatentSnapshot`.
-
-    Produced by `features.patents.extract_features(snapshot)`. Pure
-    counting + span computation — no leakage logic, since the snapshot is
-    already cleansed.
-    """
-
-    model_config = ConfigDict(extra="ignore")
-
-    trial_number: str
-    application_number: str
-    cpc_section: str | None = None
-    n_events_pre_t0: int = 0
-    prosecution_span_days: int | None = None
-    n_pe_pre_t0: int = 0
-    n_ex_pre_t0: int = 0
-    n_aa_pre_t0: int = 0
-    n_ad_pre_t0: int = 0
-    n_iss_pre_t0: int = 0
-    n_maint_pre_t0: int = 0
-    n_other_pre_t0: int = 0
-    n_office_actions: int = 0
-    n_ids_filings: int = 0
-    n_assignments_pre_t0: int = 0
-    n_distinct_assignees_pre_t0: int = 0
-    days_since_last_assignment: int | None = None
-    n_parent_applications: int = 0
-    days_grant_to_petition: int | None = None
-
-
-class JoinedTrial(BaseModel):
-    """Final structured-feature frame: trials ⟕ petitions ⟕ patent_features.
-
-    Quarantined trials (no pickable petition) are excluded entirely — the
-    join is left on petitions, not trials. `patent_features` is None when
-    the application number is missing or the patent fetch failed.
-    """
-
-    model_config = ConfigDict(extra="ignore")
-
-    # Proceedings-derived (mirrors the flatten output of the proceedings parser)
-    trial_number: str
-    trial_type: str | None = None
-    trial_status: str | None = None
-    petition_filing_date: date
-    accorded_filing_date: date | None = None
-    institution_decision_date: date | None = None
-    latest_decision_date: date | None = None
-    termination_date: date | None = None
-    patent_number: str | None = None
-    owner_real_party: str | None = None
-    owner_counsel: str | None = None
-    grant_date: date | None = None
-    group_art_unit: str | None = None
-    technology_center: str | None = None
-    inventor_name: str | None = None
-    application_number: str | None = None
-    petitioner_real_party: str | None = None
-
-    cancelled: int
-
-    # Petition seam
-    petition_pdf_uri: str
-    petition_filing_date_doc: date
-
-    # Patent seam
-    patent_features: PatentFeatures | None = None
-
-
 class JoinReport(BaseModel):
     """Audit counts for a single `join_all` run."""
 
@@ -396,7 +293,6 @@ class JoinReport(BaseModel):
     n_trials_labeled: int
     n_petition_t0_mismatch: int
     n_joined: int
-    n_with_patent_features: int
 
 
 class PdfFetchManifestRow(BaseModel):

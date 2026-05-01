@@ -8,8 +8,6 @@ silently corrupts a downstream feature pipeline.
 from datetime import date, datetime
 
 from ml_uspto.schemas.models import (
-    JoinedTrial,
-    PatentFeatures,
     PatentFetchResult,
     PdfFetchManifestRow,
     Petition,
@@ -86,46 +84,6 @@ def test_petition_minimal_construction():
     )
     assert p.petition_title is None
     assert p.petition_category is None
-
-
-def test_patent_features_counters_default_to_zero():
-    f = PatentFeatures(trial_number="IPR2024-00123", application_number="14709428")
-    assert f.n_events_pre_t0 == 0
-    assert f.n_ex_pre_t0 == 0
-    assert f.n_other_pre_t0 == 0
-    assert f.n_office_actions == 0
-    assert f.days_grant_to_petition is None
-
-
-def test_joined_trial_nests_patent_features():
-    pf = PatentFeatures(
-        trial_number="IPR2024-00123",
-        application_number="14709428",
-        cpc_section="G",
-        n_events_pre_t0=42,
-    )
-    jt = JoinedTrial(
-        trial_number="IPR2024-00123",
-        petition_filing_date=date(2024, 3, 1),
-        cancelled=1,
-        petition_pdf_uri="https://example.test/petition.pdf",
-        petition_filing_date_doc=date(2024, 3, 1),
-        patent_features=pf,
-    )
-    assert jt.patent_features is not None
-    assert jt.patent_features.cpc_section == "G"
-    assert jt.cancelled == 1
-
-
-def test_joined_trial_allows_missing_patent_features():
-    jt = JoinedTrial(
-        trial_number="IPR2024-00123",
-        petition_filing_date=date(2024, 3, 1),
-        cancelled=0,
-        petition_pdf_uri="https://example.test/petition.pdf",
-        petition_filing_date_doc=date(2024, 3, 1),
-    )
-    assert jt.patent_features is None
 
 
 def test_pdf_fetch_manifest_row_records_failure():
