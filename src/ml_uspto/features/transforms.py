@@ -1,9 +1,15 @@
-"""Joined frame → leakage-free intermediate feature matrix."""
+"""Joined frame → leakage-free intermediate feature matrix.
+
+Patent aggregation reads the parallel-array columns the joiner attaches
+from `Frame.PATENTS`; petition-text aggregation reads the
+`petition_text` column the joiner attaches from `Frame.PETITION_TEXTS`.
+Both are row-local — no cross-row corpus statistics — and apply T₀
+leakage discipline where time-bound (patent events).
+"""
 
 from __future__ import annotations
 
 import logging
-import re
 from datetime import date
 
 import numpy as np
@@ -16,15 +22,31 @@ from ml_uspto.features.schemas.constants import (
     OHE_CATEGORICAL_COLUMNS,
     PATENT_COUNT_FEATURES,
     PATENT_NULLABLE_NUMERIC,
+    PETITION_TEXT_FEATURE_KEYS,
+    PRESIDENTIAL_REGIMES,
     TRIAL_EVENT_PREFIXES,
 )
 from ml_uspto.features.schemas.enums import EventCategory
+from ml_uspto.features.schemas.patterns import NORMALIZE_NON_ALNUM
+from ml_uspto.parse.schemas.patterns import (
+    _FINTIV_FACTOR_WORD_TO_INDEX,
+    PETITION_FINTIV_FACTOR_ANCHORED_DIGIT_PATTERN,
+    PETITION_FINTIV_FACTOR_COLON_PATTERN,
+    PETITION_FINTIV_FACTOR_HEADING_PATTERN,
+    PETITION_FINTIV_FACTOR_KEYWORD_PATTERNS,
+    PETITION_FINTIV_FACTOR_LINE_PATTERN,
+    PETITION_FINTIV_FACTOR_ORDINAL_PATTERN,
+    PETITION_FINTIV_FACTOR_THRESHOLD,
+    PETITION_FINTIV_FACTOR_WORDNUM_PATTERN,
+    PETITION_GROUND_HEADER_PATTERN,
+    PETITION_GROUND_STATUTE_102_PATTERN,
+    PETITION_GROUND_STATUTE_103_PATTERN,
+    PETITION_SOTERA_PATTERNS,
+)
 from ml_uspto.parse.utils import to_date
 
 logger = logging.getLogger(__name__)
 
-
-_NORMALIZE_NON_ALNUM = re.compile(r"[^a-z0-9]+")
 
 _NON_TRIAL_CATEGORIES: tuple[EventCategory, ...] = tuple(
     cat for cat in EventCategory if cat is not EventCategory.TRIAL
@@ -52,8 +74,20 @@ def _event_category(code: str) -> EventCategory:
     return EVENT_CODE_CATEGORIES.get(code, EventCategory.OTHER)
 
 
+def _presidential_regime(d: date | None) -> str | None:
+    if d is None:
+        return None
+    label: str | None = None
+    for start, name in PRESIDENTIAL_REGIMES:
+        if d >= start:
+            label = name
+        else:
+            break
+    return label
+
+
 def _normalize_assignee(name: str) -> str:
-    normalized = _NORMALIZE_NON_ALNUM.sub(" ", name.lower()).strip()
+    normalized = NORMALIZE_NON_ALNUM.sub(" ", name.lower()).strip()
     return " ".join(normalized.split())
 
 
@@ -193,8 +227,9 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
         `days_grant_to_petition`, `days_since_last_assignment`) paired
         with their `_missing` regime indicators set *before* any
         imputation; raw categoricals for the downstream encoder
-        (`technology_center`, `cpc_section`, `petitioner_real_party`,
-        `owner_real_party`). The label column (`cancelled`) is not
+        (`technology_center`, `cpc_section`, `presidential_regime`,
+        `petitioner_real_party`, `owner_real_party`). The label column
+        (`cancelled`) is not
         part of the returned frame — callers attach it back from `df`.
     """
     patent_features = _aggregate_patents(df)
@@ -210,6 +245,9 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
         features["filing_year"] = pf.dt.year.astype("Int64")
         features["filing_month"] = pf.dt.month.astype("Int64")
         features["filing_dayofweek"] = pf.dt.dayofweek.astype("Int64")
+        features["presidential_regime"] = (
+            augmented["petition_filing_date"].map(to_date).map(_presidential_regime)
+        )
 
     if "group_art_unit" in augmented.columns:
         features["art_unit_group"] = pd.to_numeric(
@@ -258,8 +296,108 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
             values = augmented[col].astype(object)
             features[col] = values.where(values.notna(), np.nan)
 
+    # Tier A petition-text features. The joiner attaches `petition_text`
+    # from `Frame.PETITION_TEXTS`; rows with no cached text get NaN, so
+    # the regex aggregator falls back to 0 per its empty-text branch.
+    if "petition_text" in augmented.columns:
+        text_features = pd.DataFrame(
+            list(augmented["petition_text"].map(_aggregate_petition_text_row)),
+            index=augmented.index,
+        )
+        for col in PETITION_TEXT_FEATURE_KEYS:
+            features[col] = text_features[col]
+
     logger.info("Built %d features for %d samples", features.shape[1], features.shape[0])
     return features
+
+
+# ---------------------------------------------------------------------------
+# Tier A petition-text features
+#
+# Pure per-row transforms invoked from `build_features` once the joined
+# frame carries the `petition_text` column (left-joined by the joiner
+# from `Frame.PETITION_TEXTS`). Same shape as patent aggregation.
+# ---------------------------------------------------------------------------
+
+
+def _aggregate_petition_text_row(text: object) -> dict[str, int]:
+    """Run the Tier A regex set over one petition's pdfplumber-extracted text.
+
+    Mirrors `_aggregate_patent_row`: row-local, no I/O, NaN/None text
+    treated as empty (every feature falls back to 0). Booleans are
+    cast to 0/1 so the result drops straight into a numeric DataFrame
+    column.
+    """
+    if not isinstance(text, str) or not text:
+        return {k: 0 for k in PETITION_TEXT_FEATURE_KEYS}
+
+    # Four capture groups across three branches: group(1) is the
+    # "Ground N" digit, group(2) is the "Challenge #N" digit, groups
+    # (3) and (4) are both digits from a "Grounds N and M" plural-form
+    # match. Each match contributes 1-2 digits to the distinct set.
+    digits: set[str] = set()
+    for m in PETITION_GROUND_HEADER_PATTERN.finditer(text):
+        for g in m.groups():
+            if g:
+                digits.add(g)
+    n_grounds = len(digits)
+
+    # Fintiv: a petition fires if ANY signal reaches the threshold of 3
+    # distinct factor indices. Seven phrasing variants captured:
+    #   (a) keyword-anchored "Factor N + canonical keyword"
+    #   (b) colon/period-headed "Factor N: ..." (any phrasing)
+    #   (c) ordinal narrative "the first/second/.../sixth Fintiv factor"
+    #   (d) bare numbered headings "1. Stay" / "2. Trial Date" line-anchored
+    #   (e) word-form "Factor one / two / .../ six" (IPR2024-00323)
+    #   (f) line-anchored "Factor [1-6]" without delimiter (IPR2024-01463)
+    #   (g) "Fintiv factor [1-6]" digit-anchored (IPR2025-00555 narrative)
+    # Variants (e) and (f) are gated by an explicit "Fintiv" mention
+    # somewhere in the petition — without that precondition, line-
+    # anchored "Factor 1: ..." / "Factor one ..." in non-Fintiv contexts
+    # (Graham §103 obviousness factors, KSR factors) would FP.
+    n_keyword_hits = sum(
+        1 for p in PETITION_FINTIV_FACTOR_KEYWORD_PATTERNS if p.search(text) is not None
+    )
+    n_colon_hits = len({m.group(1) for m in PETITION_FINTIV_FACTOR_COLON_PATTERN.finditer(text)})
+    n_ordinal_hits = len({
+        _FINTIV_FACTOR_WORD_TO_INDEX[m.group(1).lower()]
+        for m in PETITION_FINTIV_FACTOR_ORDINAL_PATTERN.finditer(text)
+    })
+    n_heading_hits = len({m.group(1) for m in PETITION_FINTIV_FACTOR_HEADING_PATTERN.finditer(text)})
+    # Three substring checks beat a full text.lower() at corpus scale —
+    # petitions are 100-500KB and a lower() copy each call is wasteful
+    # when only one literal needs case-insensitive matching.
+    fintiv_anywhere = "Fintiv" in text or "fintiv" in text or "FINTIV" in text
+    n_wordnum_hits = (
+        len({
+            _FINTIV_FACTOR_WORD_TO_INDEX[m.group(1).lower()]
+            for m in PETITION_FINTIV_FACTOR_WORDNUM_PATTERN.finditer(text)
+        })
+        if fintiv_anywhere else 0
+    )
+    n_line_hits = (
+        len({m.group(1) for m in PETITION_FINTIV_FACTOR_LINE_PATTERN.finditer(text)})
+        if fintiv_anywhere else 0
+    )
+    n_anchored_hits = len({
+        d
+        for m in PETITION_FINTIV_FACTOR_ANCHORED_DIGIT_PATTERN.finditer(text)
+        for d in m.groups() if d
+    })
+    fintiv = max(
+        n_keyword_hits, n_colon_hits, n_ordinal_hits, n_heading_hits,
+        n_wordnum_hits, n_line_hits, n_anchored_hits,
+    ) >= PETITION_FINTIV_FACTOR_THRESHOLD
+
+    return {
+        "n_grounds": n_grounds,
+        "n_grounds_102": len(PETITION_GROUND_STATUTE_102_PATTERN.findall(text)),
+        "n_grounds_103": len(PETITION_GROUND_STATUTE_103_PATTERN.findall(text)),
+        "has_sotera_stipulation": int(
+            any(p.search(text) is not None for p in PETITION_SOTERA_PATTERNS)
+        ),
+        "mentions_fintiv_factors": int(fintiv),
+    }
 
 
 __all__ = ["build_features"]
