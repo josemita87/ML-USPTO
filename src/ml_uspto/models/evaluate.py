@@ -15,10 +15,65 @@ from sklearn.metrics import (
     roc_auc_score,
     roc_curve,
 )
+from sklearn.model_selection import TimeSeriesSplit, cross_validate
+from sklearn.pipeline import Pipeline
 
 from ml_uspto.schemas.models import ModelMetrics
 
 logger = logging.getLogger(__name__)
+
+
+DEFAULT_TIME_SERIES_SCORING: tuple[str, ...] = (
+    "roc_auc",
+    "average_precision",
+    "accuracy",
+    "f1",
+)
+
+
+def time_series_cv(
+    pipeline: Pipeline,
+    X: pd.DataFrame,
+    y: pd.Series,
+    petition_dates: pd.Series,
+    n_splits: int = 5,
+    scoring: tuple[str, ...] | list[str] = DEFAULT_TIME_SERIES_SCORING,
+) -> dict[str, np.ndarray]:
+    """Forward-walking time-series CV against `petition_filing_date`.
+
+    Each test fold is strictly later than its train fold — sklearn's
+    `TimeSeriesSplit` only knows row order, so we sort `(X, y)` by
+    `petition_dates` first. This is an approximation of deployment-time
+    generalization: trial outcomes don't crystallize until ~18 months
+    after T₀, so a strict T₀-frozen evaluation would also need to drop
+    rows whose label was unknown as of the fold cutoff. For a typical
+    benchmark the row-order approximation is close enough — the AUC
+    drop versus shuffled CV reveals temporal regime drift even without
+    the unresolved-trial filter.
+
+    Args:
+        pipeline: Estimator pipeline (preprocessor + model).
+        X: Feature frame; must align with `y` and `petition_dates`.
+        y: Binary labels.
+        petition_dates: Petition filing dates (T₀) — same index as X.
+        n_splits: Number of forward-walking folds.
+        scoring: sklearn scoring keys to evaluate per fold.
+
+    Returns:
+        The raw `cross_validate` result dict (keys
+        `test_<metric>`, `fit_time`, `score_time`).
+    """
+    order = np.argsort(pd.to_datetime(petition_dates).to_numpy(), kind="stable")
+    X_sorted = X.iloc[order].reset_index(drop=True)
+    y_sorted = y.iloc[order].reset_index(drop=True)
+    return cross_validate(
+        pipeline,
+        X_sorted,
+        y_sorted,
+        cv=TimeSeriesSplit(n_splits=n_splits),
+        scoring=list(scoring),
+        n_jobs=-1,
+    )
 
 
 def evaluate_model(

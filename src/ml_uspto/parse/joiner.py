@@ -30,15 +30,19 @@ def join_all(
     decisions: pd.DataFrame,
     petitions: pd.DataFrame,
     patents: pd.DataFrame,
+    petition_texts: pd.DataFrame,
 ) -> tuple[pd.DataFrame, JoinReport]:
-    """Build the labeled, petitioned, patent-attached trial frame.
+    """Build the labeled, petitioned, patent-attached, text-attached trial frame.
 
-    Pure structural post-processing — patent feature engineering (T₀
-    leakage filtering, count aggregation, transforms) happens entirely
-    downstream in `features.transforms.build_features`. The joined
-    frame just carries the patent parallel-array columns
-    (`event_codes`, `event_dates`, `assignment_received_dates`,
-    `assignees_per_assignment`, …) along for the features stage.
+    Pure structural post-processing — feature engineering (T₀ leakage
+    filtering, count aggregation, regex extraction over petition text,
+    transforms) happens entirely downstream in
+    `features.transforms.build_features`. The joined frame carries:
+      - patent parallel-array columns from `Frame.PATENTS`
+        (`event_codes`, `event_dates`, `assignment_received_dates`,
+        `assignees_per_assignment`, …);
+      - the raw `petition_text` column from `Frame.PETITION_TEXTS`
+        (full pdfplumber-extracted text per trial).
 
     Steps:
       1. `build_labels(trials, decisions)` → labeled trials with
@@ -55,6 +59,10 @@ def join_all(
          patent fetch failed carry NaN for every patent column — the
          features stage flags those rows via the
          `patent_features_missing` regime indicator.
+      6. Left-join with `petition_texts` on `trial_number`. Trials
+         whose petition PDF hasn't been fetched/extracted yet carry
+         NaN for `petition_text`; the features-stage Tier A aggregator
+         falls back to 0 on empty text.
 
     Args:
         storage: Backend forwarded to `build_labels` for the cached
@@ -64,6 +72,9 @@ def join_all(
         petitions: Frame of `Petition` rows from
             `parse.petitions.assemble_petitions`.
         patents: Flattened patent file-wrapper frame.
+        petition_texts: Per-trial pdfplumber-extracted petition text
+            from `Frame.PETITION_TEXTS` (columns: `trial_number`,
+            `petition_text`).
 
     Returns:
         Tuple of (joined frame, `JoinReport`) describing input/output
@@ -109,6 +120,10 @@ def join_all(
         patents = patents.assign(application_number=patents["application_number"].astype(str))
         joined["application_number"] = joined["application_number"].astype(str)
         joined = joined.merge(patents, on="application_number", how="left")
+
+    pt = petition_texts.copy()
+    pt["trial_number"] = pt["trial_number"].astype(str)
+    joined = joined.merge(pt, on="trial_number", how="left")
 
     report = JoinReport(
         n_trials_input=n_trials_input,

@@ -33,7 +33,12 @@ from pathlib import Path
 import pytest
 
 from ml_uspto.parse.labels import extract_outcome
-from ml_uspto.schemas.constants import FWD_ORIGINAL_MARKER
+from ml_uspto.schemas.constants import (
+    FWD_ORIGINAL_DOCUMENT_TYPES,
+    LEGACY_FWD_AMENDMENT_TITLE_MARKERS,
+    LEGACY_FWD_DOCUMENT_TYPE,
+    normalize_doctype,
+)
 
 TEXT_CACHE_DIR = Path("data/raw/decision_texts")
 MANIFEST_PATH = TEXT_CACHE_DIR / "_sample_manifest.json"
@@ -56,13 +61,21 @@ def _label_from_title(title: str) -> int | None:
 
 
 def _is_original(entry: dict) -> bool:
-    """True iff this FWD is an original (not on-remand / rehearing).
+    """True iff this FWD is an original (not on-remand / rehearing / supplemental).
 
     Mirrors `parse.labels._identify_terminating_fwd`'s filter — see
     `docs/scope/prediction_scope.md` §3.1 for why we only label originals.
+    Handles both modern (`Final Written Decision:  original`) and legacy
+    (`Final Decision`) document_type taxonomies.
     """
-    dt = (entry.get("document_type") or "").lower()
-    return "final written decision" in dt and FWD_ORIGINAL_MARKER.lower() in dt
+    dt = normalize_doctype(entry.get("document_type") or "")
+    if dt not in FWD_ORIGINAL_DOCUMENT_TYPES:
+        return False
+    if dt == LEGACY_FWD_DOCUMENT_TYPE:
+        title = (entry.get("document_title") or "").lower()
+        if any(m in title for m in LEGACY_FWD_AMENDMENT_TITLE_MARKERS):
+            return False
+    return True
 
 
 def _load_manifest() -> list[dict]:

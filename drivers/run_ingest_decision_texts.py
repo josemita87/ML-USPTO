@@ -28,13 +28,10 @@ def main() -> None:
     Flags:
         --dry-run: run the gap detector, print the count and a sample, no fetch.
         --limit N: cap downloads (smoke runs / re-run idempotency checks).
-        --rate-sleep S: pause between requests to stay under the ~1.2M/wk PDF
-            bucket budget (default 2.0s).
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--limit", type=int, default=None, help="cap downloads")
-    parser.add_argument("--rate-sleep", type=float, default=2.0)
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -68,9 +65,7 @@ def main() -> None:
     client = USPTOClient()
     n_ok = 0
     n_fail = 0
-    for result in fetch_decision_pdfs(
-        storage, client, candidates, rate_sleep=args.rate_sleep
-    ):
+    for result in fetch_decision_pdfs(storage, client, candidates):
         if result.bytes_written is None:
             n_fail += 1
         else:

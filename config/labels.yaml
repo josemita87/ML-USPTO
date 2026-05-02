@@ -35,26 +35,43 @@ pending_statuses:
   - Pending Director Review
   - Trial Instituted
 
-# `documentTypeDescriptionText` markers that identify FWD rows.
-# Empirically `decisionTypeCategory` only carries "Decision"/"Rehearing
-# Decision" (~18K rows total, 2026-04-29 cold-run), so the FWD marker has
-# to come from `documentTypeDescriptionText`. Variants we observed:
-#   "Final Written Decision:  original"                   — 2076  (95.2%)
-#   "Final Written Decision: On remand from the CAFC"    —   67  ( 3.1%)
-#   "Final written decision:  On remand"                  —   17  ( 0.8%)
-#   "Final Written Decision:  rehearing"                  —   11  ( 0.5%)
-#   "Final Written Decision: on Remand from the Director" —    9  ( 0.4%)
+# `documentTypeDescriptionText` values for the trial-terminating
+# *original* FWD across the legacy and modern decisions taxonomies.
+# Empirical (2026-05-01 cold-run cache, 4,416 FWD-ish rows total):
+#   Modern (2018+):
+#     "Final Written Decision:  original"                   — 2076
+#     "Final Written Decision: On remand from the CAFC"    —   67   (excluded — amendment)
+#     "Final written decision:  On remand"                  —   17   (excluded — amendment)
+#     "Final Written Decision:  rehearing"                  —   11   (excluded — amendment)
+#     "Final Written Decision: on Remand from the Director" —    9   (excluded — amendment)
+#   Legacy (2012-2020, single bucket):
+#     "Final Decision"                                      — 2340
 #
-# `fwd_decision_type_marker` matches all five (case-insensitive substring).
-# `fwd_original_marker` is the strict subset that carries the trial-level
-# label per `docs/scope/prediction_scope.md` §3.1 — amendment FWDs
-# (on-remand, rehearing) are dropped because their cover-page outcome
-# refers to the remanded subset, not the originally-challenged set.
-# Substring chosen so both spellings ("Final Written Decision" and
-# "Final written decision") pass when followed by the literal "original"
-# substring; case-insensitive matching is required for the W vs w drift.
-fwd_decision_type_marker: Final Written Decision
-fwd_original_marker: original
+# PTAB renamed the original-FWD bucket from `Final Decision` to
+# `Final Written Decision:  original` around 2019-2020. Both forms
+# coexist in the cache for ~2018-2020 trials filed during the rename;
+# pre-2018 trials are legacy-only. Without the legacy entry below the
+# labeler silently drops ~2,300 FWDs and the labeled corpus has zero
+# `cancelled=1` examples before 2018 (`docs/scope/prediction_scope.md` §3.1).
+#
+# Match is case-insensitive after `.strip()`. Amendment FWDs in modern
+# data are filtered by document_type alone (the bucket is specific);
+# in legacy data the variant lives in the title — see
+# `legacy_fwd_amendment_title_markers`.
+fwd_original_document_types:
+  - "Final Written Decision:  original"
+  - "Final Decision"
+
+# Title substrings that flag a legacy-form (`document_type =
+# "Final Decision"`) row as an amendment FWD rather than the original.
+# Modern equivalents are excluded by document_type alone, so this
+# filter only applies to rows in the legacy bucket. Case-insensitive
+# substring match against `documentTitleText`.
+legacy_fwd_amendment_title_markers:
+  - "on remand"
+  - "rehearing"
+  - "supplemental"
+  - "termination decision document"
 
 # trialOutcomeCategory values from the *terminating* FWD that map to label 1.
 # ⚠ The API never populates this taxonomy: every IPR FWD returns the bare
@@ -125,4 +142,54 @@ fwd_pdf_outcome:
     # doesn't fall through to this default.
     - name: challenged_implicit_all
       regex: 'Determining\s+Challenged\s+Claims?\s+Unpatentable'
+      label: 1
+
+# Legacy ORDER-section regex for FWDs that pre-date the cover-page
+# `Determining ... Unpatentable` convention (typically 2012-2018 trials,
+# documents tagged `Final Decision`). The granular ruling lives at the
+# end of the opinion in a "IV. ORDER" / "V. ORDER" block, e.g.:
+#
+#   IV. ORDER
+#   Accordingly, it is:
+#   ORDERED that claims 1–24 of the '162 patent have been shown to be
+#   unpatentable;
+#   FURTHER ORDERED that claims 25–30 ... have not been shown to be
+#   unpatentable; ...
+#
+# Patterns anchor on `ORDERED that` to stay within the judgment block;
+# the `.{0,400}` window accommodates the multi-line clause structure
+# (ORDERED + claim list + ruling). Patterns are evaluated in order:
+# the negation form fires first because mixed outcomes (some claims
+# unpatentable, others not) must resolve to label 0 per
+# `docs/scope/prediction_scope.md` §3.
+#
+# `tail_search_chars` clips the search to the last N chars of the
+# document so body-text discussion of prior art ("the panel found that
+# claim X has been shown to be unpatentable" inside §IV.A analysis)
+# can't override the actual ORDER ruling.
+fwd_pdf_outcome_legacy:
+  tail_search_chars: 10000
+  patterns:
+    # Any "not" + "unpatentable" combo inside an ORDERED clause →
+    # label 0 (some claims survived). Catches all observed phrasings:
+    #   "have not been shown to be unpatentable"  (passive, dominant)
+    #   "has not shown ... claims X are unpatentable"  (active, e.g. IPR2018-00393)
+    #   "not been determined to be unpatentable"
+    # The `[^;]{0,500}` window pins the match to a single semicolon-
+    # delimited ORDERED clause so a positive ruling in one clause and a
+    # negative ruling in the next don't collide.
+    #
+    # MUST be ordered before the positive pattern: in a mixed outcome
+    # (some claims unpatentable, some not), label 0 wins per
+    # `docs/scope/prediction_scope.md` §3.
+    - name: legacy_claims_survived
+      regex: 'ORDERED\s+that[^;]{0,500}\bnot\b[^;]{0,500}unpatentable'
+      label: 0
+    # Any "unpatentable" inside an ORDERED clause that wasn't already
+    # caught by the negation form → label 1 (all challenged claims
+    # unpatentable). Motion clauses ("ORDERED that Petitioner's Motion
+    # to Exclude is denied") don't contain "unpatentable" so they
+    # can't trigger this.
+    - name: legacy_claims_unpatentable
+      regex: 'ORDERED\s+that[^;]{0,500}unpatentable'
       label: 1

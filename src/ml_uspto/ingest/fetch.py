@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import io
 import logging
-import time
 from collections.abc import Callable, Iterable, Iterator
 from typing import Any
 
@@ -22,6 +21,7 @@ from ml_uspto.schemas.enums import Frame
 from ml_uspto.schemas.models import (
     DecisionPdfFetchResult,
     PatentFetchResult,
+    PetitionPdfFetchResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -356,8 +356,6 @@ def fetch_decision_pdfs(
     storage: Storage,
     client: USPTOClient,
     candidates: pd.DataFrame,
-    *,
-    rate_sleep: float = 2.0,
 ) -> Iterator[DecisionPdfFetchResult]:
     """Download each candidate FWD PDF, extract text, cache, yield outcomes.
 
@@ -367,16 +365,16 @@ def fetch_decision_pdfs(
     with `bytes_written=None`; the next cron's gap-detector will pick
     the same doc up again.
 
+    Pacing relies on pdfplumber's 5–25s/file CPU cost (which keeps the
+    request rate ~20× under the 1.2M/wk PDF bucket) plus the 429 backoff
+    inside `USPTOClient.download_pdf`.
+
     Args:
         storage: Backend for cached opinion-text blobs.
         client: USPTO ODP client.
         candidates: Frame returned by
             `ingest.decisions.enumerate_missing_fwd_pdfs` — already
             filtered for cache hits, so every row is a fresh attempt.
-        rate_sleep: Fixed inter-request pause to stay well under the
-            PDF-bucket budget (~1.2M requests/week — much tighter than
-            metadata). The 429 backoff inside `USPTOClient.download_pdf`
-            handles bursts; this sleep keeps the average rate down.
 
     Yields:
         One `DecisionPdfFetchResult` per row.
@@ -418,13 +416,81 @@ def fetch_decision_pdfs(
                 exc,
             )
             yield DecisionPdfFetchResult(document_identifier=doc_id)
-            time.sleep(rate_sleep)
             continue
 
         text_bytes = text.encode("utf-8")
         storage.save_blob(Stage.DECISION_TEXTS.value, doc_id, "txt", text_bytes)
         yield DecisionPdfFetchResult(document_identifier=doc_id, bytes_written=len(text_bytes))
-        time.sleep(rate_sleep)
+
+
+def fetch_petition_pdfs(
+    storage: Storage,
+    client: USPTOClient,
+    candidates: pd.DataFrame,
+) -> Iterator[PetitionPdfFetchResult]:
+    """Download each candidate petition PDF, extract text, cache, yield.
+
+    Mirrors `fetch_decision_pdfs`: the extracted text lands at
+    `Stage.PETITION_TEXTS / <trial_number>.txt` (text-only — the binary
+    is never persisted). Failures yield a result with `bytes_written=None`;
+    the next cron's gap-detector picks them up again.
+
+    Pacing: pdfplumber over a 60–120-page petition is the natural pacer;
+    bursts are absorbed by the 429 backoff inside
+    `USPTOClient.download_pdf`.
+
+    Args:
+        storage: Backend for cached petition-text blobs.
+        client: USPTO ODP client.
+        candidates: Frame returned by
+            `ingest.petitions.enumerate_missing_petition_pdfs` —
+            already filtered for cache hits and missing-URI rows.
+
+    Yields:
+        One `PetitionPdfFetchResult` per row.
+    """
+    trials = candidates["trial_number"].astype(str)
+    uris = candidates["petition_pdf_uri"].astype(str)
+    for trial, uri in zip(trials, uris, strict=True):
+        try:
+            payload = client.download_pdf(uri)
+        except requests.HTTPError as exc:
+            response = exc.response
+            status = response.status_code if response is not None else None
+            logger.warning(
+                "Petition-PDF download failed (HTTP %s) trial=%s: %s", status, trial, exc
+            )
+            yield PetitionPdfFetchResult(trial_number=trial)
+            continue
+        except (requests.RequestException, RuntimeError) as exc:
+            logger.warning("Petition-PDF request error trial=%s: %s", trial, exc)
+            yield PetitionPdfFetchResult(trial_number=trial)
+            continue
+
+        if not payload:
+            logger.warning("Petition-PDF empty response trial=%s", trial)
+            yield PetitionPdfFetchResult(trial_number=trial)
+            continue
+
+        try:
+            with pdfplumber.open(io.BytesIO(payload)) as pdf:
+                text = "\n".join((page.extract_text() or "") for page in pdf.pages)
+        except Exception as exc:  # noqa: BLE001 — pdfplumber raises a zoo of types
+            logger.warning(
+                "Petition-PDF pdfplumber error trial=%s: %s: %s",
+                trial,
+                type(exc).__name__,
+                exc,
+            )
+            yield PetitionPdfFetchResult(trial_number=trial)
+            continue
+
+        text_bytes = text.encode("utf-8")
+        storage.save_blob(Stage.PETITION_TEXTS.value, trial, "txt", text_bytes)
+        yield PetitionPdfFetchResult(
+            trial_number=trial,
+            bytes_written=len(text_bytes),
+        )
 
 
 __all__ = [
@@ -433,4 +499,5 @@ __all__ = [
     "fetch_petitions",
     "fetch_patents",
     "fetch_decision_pdfs",
+    "fetch_petition_pdfs",
 ]

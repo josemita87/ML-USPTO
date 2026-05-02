@@ -194,9 +194,11 @@ class Petition(BaseModel):
     Scaffolding only — *not* the source of model features. The role of
     `Petition` is to identify which filing is the petition, capture the
     documents-side filing date for the T₀ cross-check, and carry
-    `petition_pdf_uri` as a handle. The actual petition features live
-    on `PetitionTextFeatures`, populated by the deferred Tier 1/2
-    pipeline (see `docs/scope/prediction_scope.md` §5 and
+    `petition_pdf_uri` as a handle for the petition-text ingest driver.
+    The actual petition features land as columns on the joined frame
+    via `Frame.PETITION_TEXTS` and are computed in
+    `features.transforms.build_features` (see
+    `docs/scope/prediction_scope.md` §5 and
     `docs/features/admissible_documents_analysis.md`).
 
     Built from `documentData.*` paths only. The `trialMetaData` block on a
@@ -242,6 +244,21 @@ class DecisionPdfFetchResult(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     document_identifier: str
+    bytes_written: int | None = None
+
+
+class PetitionPdfFetchResult(BaseModel):
+    """One petition-PDF download outcome from `ingest.fetch.fetch_petition_pdfs`.
+
+    Mirrors `DecisionPdfFetchResult` but keyed by `trial_number`
+    (petitions are 1-per-trial after `parse.petition_picker`).
+    `bytes_written` is `None` on failure; binaries are never persisted
+    (text-only cache mirrors the FWD policy).
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    trial_number: str
     bytes_written: int | None = None
 
 
@@ -332,62 +349,6 @@ class PdfFetchManifestRow(BaseModel):
     error: str | None = None
 
 
-class PetitionTextDoc(BaseModel):
-    """Tier 0 — raw extracted petition text. Persisted as `*.json.gz`.
-
-    Source-of-truth for re-extraction so we never re-download the PDF to
-    recompute Tier 1/2 features.
-    """
-
-    model_config = ConfigDict(extra="ignore")
-
-    trial_number: str
-    page_count: int
-    char_count: int
-    pages: list[str]
-    pdfplumber_version: str
-    extracted_at: datetime
-
-
-class PetitionTextFeatures(BaseModel):
-    """Tier 1 (structural) + Tier 2 (statutory + procedural) features per petition.
-
-    Produced by the deferred v2 pipeline that fetches each petition PDF
-    via the `petition_pdf_uri` handle on `Petition`, runs pdfplumber +
-    structured-regex extraction over the text, and emits this row. v1
-    ships the schema but not the producer (`docs/scope/prediction_scope.md`
-    §5; full feature catalog in `docs/features/admissible_documents_analysis.md`).
-
-    `petition_word_count` is None when the Certificate of Word Count is
-    missing/unparseable (~1–3% empirically) — honest missingness over a
-    biased `len(re.findall(...))` proxy. Every other counter defaults to 0
-    / False on extractor miss, not None.
-    """
-
-    model_config = ConfigDict(extra="ignore")
-
-    trial_number: str
-
-    # Tier 1 — structural / volumetric
-    petition_word_count: int | None = None
-    petition_page_count: int
-    n_claims_challenged: int = 0
-    n_grounds: int = 0
-    n_exhibits: int = 0
-    n_prior_art_refs: int = 0
-    n_expert_declarations: int = 0
-
-    # Tier 2 — statutory + procedural posture
-    n_grounds_102: int = 0
-    n_grounds_103: int = 0
-    has_sotera_stipulation: bool = False
-    mentions_fintiv_factors: bool = False
-    discloses_prior_iprs_same_patent: bool = False
-    n_real_parties_in_interest: int = 0
-    claim_construction_disputed_terms: int = 0
-
-    text_doc_sha256: str
-    extracted_at: datetime
 
 
 class FwdOutcomePattern(NamedTuple):

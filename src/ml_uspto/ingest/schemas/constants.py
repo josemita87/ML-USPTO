@@ -12,6 +12,15 @@ STAGE_RECORDS_KEY: dict[Stage, str] = {
     Stage.DECISIONS: "patentTrialDocumentDataBag",
 }
 
+# Output column set for the petition-PDF gap-detector frame returned by
+# `ingest.petitions.enumerate_missing_petition_pdfs` and matched by
+# downstream `Frame.PETITIONS` consumers.
+PETITION_GAP_CANDIDATE_COLUMNS: tuple[str, ...] = (
+    "trial_number",
+    "petition_pdf_uri",
+    "petition_filing_date_doc",
+)
+
 
 def _load_scan_filter() -> list[DocumentCategory]:
     with open(paths.PETITION_PICKER_YAML) as f:

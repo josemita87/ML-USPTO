@@ -11,6 +11,7 @@ class Stage(StrEnum):
     DECISIONS = "decisions"
     DECISION_TEXTS = "decision_texts"
     PATENTS = "patents"
+    PETITION_TEXTS = "petition_texts"
 
 
 class FwdPdfCandidateColumn(StrEnum):

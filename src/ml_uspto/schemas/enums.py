@@ -40,6 +40,7 @@ class Frame(StrEnum):
     TRIALS = "trials"
     DECISIONS = "decisions"
     PETITIONS = "petitions"
+    PETITION_TEXTS = "petition_texts"
     PATENTS = "patents"
     JOINED_TRIALS = "joined_trials"
     FEATURES = "features"

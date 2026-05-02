@@ -11,8 +11,6 @@ from ml_uspto.schemas.models import (
     PatentFetchResult,
     PdfFetchManifestRow,
     Petition,
-    PetitionTextDoc,
-    PetitionTextFeatures,
     Proceeding,
 )
 
@@ -101,33 +99,6 @@ def test_pdf_fetch_manifest_row_records_failure():
     assert row.bytes is None
     assert row.sha256 is None
     assert row.http_status == 503
-
-
-def test_petition_text_doc_holds_pages():
-    """Store extracted petition pages in the text-doc model."""
-    doc = PetitionTextDoc(
-        trial_number="IPR2024-00123",
-        page_count=2,
-        char_count=10,
-        pages=["hello", "world"],
-        pdfplumber_version="0.11.0",
-        extracted_at=datetime(2026, 4, 28, 12, 0, 0),
-    )
-    assert len(doc.pages) == 2
-
-
-def test_petition_text_features_word_count_optional_others_zero():
-    """Default absent petition-text feature counts to zero."""
-    feats = PetitionTextFeatures(
-        trial_number="IPR2024-00123",
-        petition_page_count=88,
-        text_doc_sha256="0" * 64,
-        extracted_at=datetime(2026, 4, 28, 12, 0, 0),
-    )
-    assert feats.petition_word_count is None
-    assert feats.n_claims_challenged == 0
-    assert feats.has_sotera_stipulation is False
-    assert feats.n_grounds_102 == 0
 
 
 def test_patent_fetch_result_shape():

@@ -11,10 +11,12 @@ from ml_uspto.ingest.schemas.enums import Stage
 from ml_uspto.parse.labels import extract_outcome
 from ml_uspto.protocols.storage import Storage
 from ml_uspto.schemas.constants import (
-    FWD_DECISION_TYPE_MARKER,
-    FWD_ORIGINAL_MARKER,
+    FWD_ORIGINAL_DOCUMENT_TYPES,
+    LEGACY_FWD_AMENDMENT_TITLE_MARKERS,
+    LEGACY_FWD_DOCUMENT_TYPE,
     NON_FWD_LABEL_0_STATUSES,
     NON_FWD_LABEL_1_STATUSES,
+    normalize_doctype,
 )
 from ml_uspto.schemas.enums import TrialType
 
@@ -34,13 +36,16 @@ def _iter_fwd_decisions(storage: Storage):
     variants reference the remanded subset rather than the
     originally-challenged set, and would yield wrong labels.
     """
-    fwd_marker = FWD_DECISION_TYPE_MARKER.lower()
-    orig_marker = FWD_ORIGINAL_MARKER.lower()
     for _page_key, payload in storage.iter_objects(Stage.DECISIONS.value):
         for record in payload.get("patentTrialDocumentDataBag") or []:
             doc = record.get("documentData") or {}
-            doc_type = (doc.get("documentTypeDescriptionText") or "").lower()
-            if fwd_marker not in doc_type or orig_marker not in doc_type:
+            doc_type = normalize_doctype(doc.get("documentTypeDescriptionText") or "")
+            if doc_type not in FWD_ORIGINAL_DOCUMENT_TYPES:
+                continue
+            title = (doc.get("documentTitleText") or "").strip()
+            if doc_type == LEGACY_FWD_DOCUMENT_TYPE and any(
+                m in title.lower() for m in LEGACY_FWD_AMENDMENT_TITLE_MARKERS
+            ):
                 continue
             ident = doc.get("documentIdentifier")
             uri = doc.get("fileDownloadURI")
@@ -52,7 +57,7 @@ def _iter_fwd_decisions(storage: Storage):
                 Col.TRIAL_NUMBER.value: str(trial),
                 Col.DOCUMENT_IDENTIFIER.value: str(ident),
                 Col.FILE_DOWNLOAD_URI.value: str(uri),
-                Col.DOCUMENT_TITLE.value: (doc.get("documentTitleText") or "").strip(),
+                Col.DOCUMENT_TITLE.value: title,
                 Col.DECISION_ISSUE_DATE.value: issue,
             }
 
@@ -118,7 +123,7 @@ def enumerate_missing_fwd_pdfs(
     n_final = len(after_cache)
 
     logger.info(
-        "FWD-text gap detector: %d original-FWD rows -> %d unresolvable-by-status/title "
+        "FWD-PDF gap detector: %d original-FWD rows -> %d unresolvable-by-status/title "
         "-> %d not cached",
         n_total, n_after_labels, n_final,
     )

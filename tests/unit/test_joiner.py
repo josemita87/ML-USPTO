@@ -120,6 +120,11 @@ def _patents_frame() -> pd.DataFrame:
     )
 
 
+def _petition_texts_frame() -> pd.DataFrame:
+    """Empty petition-text frame — schema-only stub for the required join arg."""
+    return pd.DataFrame(columns=["trial_number", "petition_text"])
+
+
 @pytest.fixture
 def empty_storage(tmp_path: Path) -> LocalStorage:
     """LocalStorage rooted at a fresh tmp_path with no seeded objects."""
@@ -134,6 +139,7 @@ def test_join_all_drops_labeled_trials_without_petition_row(empty_storage):
         decisions=_decisions_frame(),
         petitions=_petitions_frame(),
         patents=_patents_frame(),
+        petition_texts=_petition_texts_frame(),
     )
 
     assert set(df["trial_number"]) == {"IPR2022-LABEL_BY_STATUS_0", "IPR2022-LABEL_BY_FWD_1"}
@@ -150,6 +156,7 @@ def test_join_all_assigns_correct_labels(empty_storage):
         decisions=_decisions_frame(),
         petitions=_petitions_frame(),
         patents=_patents_frame(),
+        petition_texts=_petition_texts_frame(),
     )
 
     by_trial = df.set_index("trial_number")["cancelled"].to_dict()
@@ -165,6 +172,7 @@ def test_join_all_attaches_patent_arrays(empty_storage):
         decisions=_decisions_frame(),
         petitions=_petitions_frame(),
         patents=_patents_frame(),
+        petition_texts=_petition_texts_frame(),
     )
     by_trial = df.set_index("trial_number")
     fwd = by_trial.loc["IPR2022-LABEL_BY_FWD_1"]
@@ -185,6 +193,7 @@ def test_join_all_left_joins_missing_patents(empty_storage):
         decisions=_decisions_frame(),
         petitions=_petitions_frame(),
         patents=patents_partial,
+        petition_texts=_petition_texts_frame(),
     )
     assert report.n_joined == 2
     fwd = df.set_index("trial_number").loc["IPR2022-LABEL_BY_FWD_1"]
@@ -205,6 +214,7 @@ def test_join_warns_on_t0_mismatch_proceedings_wins(empty_storage, caplog):
             decisions=_decisions_frame(),
             petitions=petitions,
             patents=_patents_frame(),
+            petition_texts=_petition_texts_frame(),
         )
 
     assert report.n_petition_t0_mismatch == 1
@@ -222,6 +232,7 @@ def test_join_no_warning_when_t0_matches(empty_storage, caplog):
             decisions=_decisions_frame(),
             petitions=_petitions_frame(),
             patents=_patents_frame(),
+            petition_texts=_petition_texts_frame(),
         )
     assert report.n_petition_t0_mismatch == 0
     assert not any("T₀ mismatch" in m for m in caplog.messages)

@@ -121,12 +121,13 @@ class OrchestrationStack(cdk.Stack):
         decisions = stage("RunDecisions", "run_ingest_decisions")
         fwd_texts = stage("RunFwdTexts", "run_ingest_decision_texts")
         petitions = stage("RunPetitions", "run_ingest_petitions")
+        petition_texts = stage("RunPetitionTexts", "run_ingest_petition_text")
         patents = stage("RunPatents", "run_ingest_patents")
         join = stage("RunJoin", "run_join")
         features = stage("RunFeatures", "run_features")
 
         branch_a = proceedings.next(decisions).next(fwd_texts)
-        branch_b = petitions
+        branch_b = petitions.next(petition_texts)
 
         parallel = (
             sfn.Parallel(self, "TrialsAndPetitions")

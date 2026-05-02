@@ -4,6 +4,6 @@ from enum import StrEnum
 
 
 class ModelName(StrEnum):
-    """Identifiers for trainable estimators registered in `models.train.MODELS`."""
+    """Identifiers for trainable estimators registered in `models.schemas.constants.MODELS`."""
 
     RANDOM_FOREST = "random_forest"

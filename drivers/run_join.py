@@ -1,8 +1,9 @@
-"""Stage 4 driver — join trials ⨝ decisions ⨝ petitions ⨝ patents + label.
+"""Stage 4 driver — join trials ⨝ decisions ⨝ petitions ⨝ patents ⨝ petition-text + label.
 
-Reads stage 1–3 frames via the storage backend and writes the
-`Frame.JOINED_TRIALS` frame. No HTTP calls, no T₀ feature engineering —
-that's `drivers/run_features.py`. Run after stages 1–3 are populated.
+Reads stage 1–3 frames + the petition-text frame via the storage
+backend and writes the `Frame.JOINED_TRIALS` frame. No HTTP calls, no
+T₀ feature engineering — that's `drivers/run_features.py`. Run after
+stages 1–3 plus `drivers/run_ingest_petition_text.py` are populated.
 """
 
 import logging
@@ -18,12 +19,15 @@ def main() -> None:
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
     storage = get_storage()
+    petition_texts = storage.load_frame(Frame.PETITION_TEXTS)
+
     df, report = join_all(
         storage,
         trials=storage.load_frame(Frame.TRIALS),
         decisions=storage.load_frame(Frame.DECISIONS),
         petitions=storage.load_frame(Frame.PETITIONS),
         patents=storage.load_frame(Frame.PATENTS),
+        petition_texts=petition_texts,
     )
     storage.save_frame(df, Frame.JOINED_TRIALS)
     n_dropped = report.n_trials_labeled - report.n_joined
@@ -32,6 +36,7 @@ def main() -> None:
     print(f"  labeled (post-build_labels): {report.n_trials_labeled}")
     print(f"  labeled w/o petition row:    {n_dropped}")
     print(f"  T₀ mismatch (warned):        {report.n_petition_t0_mismatch}")
+    print(f"  petition-text rows merged:   {len(petition_texts)}")
 
 
 if __name__ == "__main__":

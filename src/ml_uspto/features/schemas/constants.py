@@ -1,5 +1,6 @@
 """Subpackage-local constants for `ml_uspto.features`."""
 
+from datetime import date
 from functools import lru_cache
 
 import yaml
@@ -50,6 +51,7 @@ PATENT_NULLABLE_NUMERIC: tuple[str, ...] = (
 OHE_CATEGORICAL_COLUMNS: tuple[str, ...] = (
     "technology_center",
     "cpc_section",
+    "presidential_regime",
 )
 
 # Frequency: open-vocabulary party identifiers. Counts must be learned
@@ -57,6 +59,31 @@ OHE_CATEGORICAL_COLUMNS: tuple[str, ...] = (
 FREQUENCY_CATEGORICAL_COLUMNS: tuple[str, ...] = (
     "petitioner_real_party",
     "owner_real_party",
+)
+
+# Presidential-regime boundaries — US inauguration dates (Jan 20).
+# Each entry is (administration_start, regime_label); the row-local
+# bucketer in `features.transforms` selects the latest start ≤ T₀.
+# AIA IPR practice begins September 2012, so administrations before
+# Obama are not represented. Trump's two non-consecutive terms are
+# distinct labels because the political/PTAB-policy environment of
+# 2017–2021 and 2025– are not interchangeable for the model.
+PRESIDENTIAL_REGIMES: tuple[tuple[date, str], ...] = (
+    (date(2009, 1, 20), "obama"),
+    (date(2017, 1, 20), "trump_1"),
+    (date(2021, 1, 20), "biden"),
+    (date(2025, 1, 20), "trump_2"),
+)
+
+# Output-contract column set produced by
+# `transforms._aggregate_petition_text_row`. Kept here so the feature
+# spec is revisable without touching the aggregation function.
+PETITION_TEXT_FEATURE_KEYS: tuple[str, ...] = (
+    "n_grounds",
+    "n_grounds_102",
+    "n_grounds_103",
+    "has_sotera_stipulation",
+    "mentions_fintiv_factors",
 )
 
 
@@ -82,6 +109,8 @@ __all__ = [
     "PATENT_NULLABLE_NUMERIC",
     "OHE_CATEGORICAL_COLUMNS",
     "FREQUENCY_CATEGORICAL_COLUMNS",
+    "PRESIDENTIAL_REGIMES",
+    "PETITION_TEXT_FEATURE_KEYS",
     "EVENT_CODE_CATEGORIES",
     "BANNED_EVENT_CATEGORIES",
     "TRIAL_EVENT_PREFIXES",

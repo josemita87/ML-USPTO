@@ -1,24 +1,17 @@
 """Model training pipeline."""
 
 import logging
-from collections.abc import Callable
 from typing import Any
 
 import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import cross_val_score
 from sklearn.pipeline import Pipeline
 
 from ml_uspto.models.preprocessing import build_pipeline
+from ml_uspto.models.schemas.constants import MODELS
 from ml_uspto.models.schemas.enums import ModelName
 
 logger = logging.getLogger(__name__)
-
-MODELS: dict[ModelName, Callable[[], Any]] = {
-    ModelName.RANDOM_FOREST: lambda: RandomForestClassifier(
-        n_estimators=200, max_depth=10, random_state=42, n_jobs=-1
-    ),
-}
 
 
 def train_and_evaluate_cv(
