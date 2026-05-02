@@ -8,7 +8,7 @@ Domain background for the IPR-outcome prediction project — terminology, regime
 
 **IPR trial outcome — exclusively.** Binary classification: did the terminating Final Written Decision hold all challenged claims unpatentable? See `prediction_scope.md` §3 for full label coding.
 
-The institution decision is **not** a prediction target — this is a deliberate shift from the original framing. A petition that fails institution is effectively a "claims survive" outcome for the patent owner, so the institution gate is absorbed into the trial-outcome label. Institution-stage signals (Fintiv, 325(d), Sotera) remain candidate petition-text features, but they are deferred to v2 and are not in the current metadata-only feature matrix.
+The institution decision is **not** a prediction target — this is a deliberate shift from the original framing. A petition that fails institution is effectively a "claims survive" outcome for the patent owner, so the institution gate is absorbed into the trial-outcome label. Institution-stage signals from the petition's own preemptive §IV framing — Sotera stipulation, Fintiv-factor coverage — are now Tier A petition-text features (`has_sotera_stipulation`, `mentions_fintiv_factors`); see `../features/features_csv_dictionary.md` §7. The 325(d) signal is deferred to v2 (Tier 1 structural extraction).
 
 ## High-Signal Features
 
@@ -16,13 +16,13 @@ The institution decision is **not** a prediction target — this is a deliberate
 
 | Feature | Description | Scope status |
 |---------|-------------|---|
-| Fintiv addressed | Whether the petition's §IV walks the six Fintiv factors | **Deferred v2.** Petition §IV header detection. |
+| Fintiv addressed | Whether the petition's §IV walks the six Fintiv factors | **In scope (Tier A).** `mentions_fintiv_factors`: fires when ≥3 distinct factor indices appear via any of seven phrasing patterns. |
 | 325(d) addressed | Whether the petition discusses prior-PTO-consideration of the asserted art | **Deferred v2.** Regex on `§ 325(d)` in petition. |
-| Sotera stipulation | Whether the petitioner committed not to raise the same invalidity arguments in district court | **Deferred v2.** Extractable from petition §IV.4 (corrects earlier "external data needed" framing — see `ptab_scope_and_terminology.md` §5). |
+| Sotera stipulation | Whether the petitioner committed not to raise the same invalidity arguments in district court | **In scope (Tier A).** `has_sotera_stipulation`: matches the verb/noun stipulation alternatives in `parse/schemas/patterns.py::PETITION_SOTERA_PATTERNS`. |
 
 ### Fintiv Sub-Factors (6 factors, ordinal scale)
 
-> **Scope note.** Judge-issued ratings live in the Institution Decision (post-T₀, excluded as a feature per scope §4). What v2 may extract is the petitioner's **own framing of the six factors in petition §IV** — advocacy, not adjudication. See `ptab_scope_and_terminology.md` §5 for the full lifecycle and the six-factor extraction targets.
+> **Scope note.** Judge-issued ratings live in the Institution Decision (post-T₀, excluded as a feature per scope §4). What v1 extracts is the petitioner's **own framing of the six factors in petition §IV** — advocacy, not adjudication — captured at low resolution by the Tier A `mentions_fintiv_factors` flag. Per-factor rating extraction (ordinal scale) is a Tier 1 v2 target. See `ptab_scope_and_terminology.md` §5 for the full lifecycle and the six-factor extraction targets.
 
 Judges rate each factor using consistent, predictable phrasing:
 1. "heavily favors" institution

@@ -17,6 +17,7 @@ Anything ODP can re-serve gets re-derived each cycle. Anything we paid rate-limi
 | Raw object cache | `<raw_root>/<Stage>/<key>.json` | Per-key overwrite (`save_object`) | API is source of truth; idempotent re-fetch picks up upstream mutations (status flips, reissued decisions) |
 | Tabular frames | `<processed_root>/<Frame>.parquet` | Whole-file overwrite (`save_frame`) | Re-flatten from raw is cheap; guarantees the frame matches current cache state |
 | FWD text blobs | `<raw_root>/decision_texts/<doc_id>.txt` | Append-only; gap detector skips cached keys. Text is extracted via pdfplumber at fetch-time; the binary PDF is never persisted | PDF-bucket is rate-limit-bound (~1.2M/wk); content is immutable once issued |
+| Petition text blobs | `<raw_root>/petition_texts/<trial_number>.txt` | Append-only; gap detector skips cached keys. Text is extracted via pdfplumber at fetch-time; the binary PDF is never persisted. Failed extractions write a `BLANK` sentinel so the trial is dropped at feature build by `features.transforms._select_usable_rows` rather than retried indefinitely | PDF-bucket is rate-limit-bound; petitions are immutable once filed |
 
 There are no quarantine frames. Patents that fail aggregation are dropped silently from `Frame.PATENTS`; trials with no pickable petition simply don't appear in `Frame.PETITIONS`, and the joiner drops them via inner-join.
 
@@ -31,15 +32,18 @@ flowchart LR
     petitions[petitions]
     patents[patents<br/>per-trial /applications]
     fwd[FWD-PDF backfill]
+    petition_text[petition-PDF backfill]
     joiner[joiner]
     features[features]
 
     trials --> decisions
     trials --> patents
     petitions --> patents
+    petitions --> petition_text
 
     decisions --> fwd
     fwd -. label resolution .-> joiner
+    petition_text -. Tier A inputs .-> joiner
 
     trials --> joiner
     decisions --> joiner
@@ -54,6 +58,7 @@ Order constraints:
 - **`petitions` runs in parallel with `trials` and `decisions`.** The corpus-wide documents/search scan and per-trial assembly are pure on the records iterator — `assemble_petitions` no longer reads `Frame.TRIALS`. The T₀ cross-check happens in the joiner where both rosters live on the same row; trials with no picked petition are absent from `Frame.PETITIONS` and drop at the join.
 - **`patents` depends on both `trials` and `petitions`** (needs `applicationNumberText` from trials + the picked petition's `petitionFilingDate` for T₀).
 - **FWD-PDF backfill depends on `decisions`** (gap detector reads `Stage.DECISIONS` raw + `Frame.TRIALS`).
+- **Petition-PDF backfill depends on `petitions`** — gap detector reads `Frame.PETITIONS` for the picked petition's `fileDownloadURI`. Pdfplumber-extracted blobs land under `Stage.PETITION_TEXTS / <trial_number>.txt` and feed the Tier A regex aggregator at feature build.
 - **Joiner waits on all of the above.** Features run last.
 
 Concurrency note: ODP enforces **burst = 1** per API key (see `rate_limits.md` §2). Stages that share the key are effectively serial against the API even when logically parallel.

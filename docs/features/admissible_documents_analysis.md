@@ -283,18 +283,18 @@ This is before joining the patent-side file-wrapper features described in `paten
 
 ## 9. What this means for v2 ingestion
 
-- **Mandatory per trial in v2**: 1 petition PDF (~4 MB).
+- **Mandatory per trial in v1**: 1 petition PDF (~4 MB), pdfplumber-extracted under `Stage.PETITION_TEXTS`.
 - **Conditional per trial in v2**: 1 ranking notice PDF (~0.14 MB), only when the petitioner stacks ≥2 petitions against the same patent.
 - **Never opened**: 33 prior-art exhibits + POA + challenged patent + file history + expert declaration + 7 parallel-lawsuit exhibits (~150 MB / trial saved).
 
-Current v1 feature ingestion opens none of these PDFs. Corpus-wide v2 text storage should be limited to petitions plus the small ranking-notice tail.
+Current v1 ingestion opens petition PDFs (Tier A regex feature inputs); the other categories above remain unopened. Corpus-wide v1 text storage is petitions plus FWD label-fallback text (~2 GB extracted across the cohort).
 
 ---
 
 ## 10. Cross-references
 
 - `../scope/prediction_scope.md` §4 — leakage rule (the why behind the T₀ filter).
-- `../scope/prediction_scope.md` §5.2 — petition PDF text features deferred to v2.
+- `../scope/prediction_scope.md` §5.2 — Tier A petition-text features in v1; Tier 1/2 deferred.
 - `patent_file_wrapper_features.md` — patent-side features that join on `patentNumber`.
 - `../examples/ipr_lifecycle_case_study.md` — the full lifecycle this scope deliberately ignores past T₀.
 - `src/ml_uspto/parse/petitions.py` — current petition picker and assembler.

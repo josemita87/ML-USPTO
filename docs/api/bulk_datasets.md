@@ -25,7 +25,7 @@ However, the gap is smaller than a "no bulk = manual per-record fetches" framing
 
 **Caveat on decision text:** the `documentOCRText` field returned by the decisions endpoint is capped at 500 characters — a case-caption preview, not the full decision. Full decision text would require fetching the PDF via `documentData.fileDownloadURI`, but **decision PDFs are out of scope as a feature source** under `../scope/prediction_scope.md` §5.1; they remain accessible for label-evaluation only.
 
-**Implication:** trial-side data comes from the live `/trials/*` API, not bulk zips. The only PDFs we fetch in the current pipeline are FWD PDFs for label fallback; petition PDFs are deferred to v2. Bulk downloads remain useful as a future scaling option for the patent-owner-side enrichment layer described in `../features/patent_file_wrapper_features.md`, but current v1 uses the live `/applications/search` file-wrapper API.
+**Implication:** trial-side data comes from the live `/trials/*` API, not bulk zips. v1 fetches two PDF families: original-FWD PDFs for label fallback (`Stage.DECISION_TEXTS`), and petition PDFs for Tier A regex feature extraction (`Stage.PETITION_TEXTS`). Bulk downloads remain useful as a future scaling option for the patent-owner-side enrichment layer described in `../features/patent_file_wrapper_features.md`, but current v1 uses the live `/applications/search` file-wrapper API.
 
 ---
 

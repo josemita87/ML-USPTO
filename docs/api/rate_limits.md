@@ -46,7 +46,7 @@ These apply to **every** request regardless of bucket:
 
 Serial-only. At ~10 req/sec sequential, the binding constraint is **wall-clock time from burst=1 serialization, not quota**.
 
-For the canonical cost model under the current scope, see **`../scope/prediction_scope.md` §5.4**. Summary: the current feature pipeline is metadata-only and is dominated by patent file-wrapper enrichment. The only PDFs fetched today are original-FWD PDFs needed for label fallback, not petition-text features. Petition PDF downloads remain deferred to v2.
+For the canonical cost model under the current scope, see **`../scope/prediction_scope.md` §5.4**. Summary: v1 cold runs are dominated by petition PDF downloads (~10 h) plus patent file-wrapper enrichment (~3–4 h). PDFs fetched today: petition PDFs (Tier A regex feature input, `Stage.PETITION_TEXTS`) and original-FWD PDFs (label fallback only, `Stage.DECISION_TEXTS`). Tier 1/2 petition-text features (declaration parsing, exhibit inspection, embeddings) remain deferred to v2.
 
 ---
 

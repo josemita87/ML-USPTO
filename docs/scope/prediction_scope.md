@@ -163,17 +163,37 @@ flowchart LR
 | Domain-expert Fintiv-rating spreadsheet | **Optional.** Useful for understanding why some petitions get discretionary-denied — informs petition-side feature engineering — but not used as a feature directly. |
 | Per-trial document indices for petition / POPR / FWD enumeration | **Cut.** Petition retrieval only. |
 
-### 5.2 Petition PDF text features deferred to v2
+### 5.2 Petition PDF text — Tier A features in v1, Tier 1/2 deferred
 
-**v1 features are metadata-only.** No petition PDF is downloaded or parsed. The petition row's `documentData.fileDownloadURI` is captured in `petitions.parquet` but not dereferenced. Tier 1 (structural / volumetric) and Tier 2 (statutory / procedural posture) text features are deferred until the metadata-only baseline is established.
+**v1 ships Tier A petition-text features.** Petition PDFs are
+downloaded and pdfplumber-extracted at fetch time; only the extracted
+text persists, under `Stage.PETITION_TEXTS / <trial_number>.txt` (the
+binary PDF is never written to disk, mirroring the FWD-text path).
+Text is then aggregated by row-local regex passes in
+`features.transforms._aggregate_petition_text_row` into five Tier A
+columns: `n_grounds`, `n_grounds_102`, `n_grounds_103`,
+`has_sotera_stipulation`, `mentions_fintiv_factors`. Pattern catalog
+in `parse/schemas/patterns.py`; ground truth + audit cohort in
+`tests/integration/test_petition_text_cached.py` (124 trials).
 
-The current PDF exception is label-only: unresolved original-FWD decisions are fetched, converted to text, and cached under `Stage.DECISION_TEXTS` so the cover-page outcome can be parsed. That text never enters the feature matrix.
+Trials whose petition text is unusable for regex extraction
+(BLANK ingest sentinel, scanned-image PDF, all-whitespace pdfplumber
+output, cover-page-only partial) are dropped from the feature matrix
+by `features.transforms._select_usable_rows` — see
+`../features/features_csv_dictionary.md` §7 for the threshold and
+its empirical justification.
+
+The decision-side PDF path is label-only: unresolved original-FWD
+decisions are fetched, converted to text, and cached under
+`Stage.DECISION_TEXTS` so the cover-page outcome can be parsed.
+That text never enters the feature matrix.
 
 Retrieval path used in v1:
 1. **Trial inventory + label** — `POST /trials/proceedings/search` paginated, filtered to `trialMetaData.trialTypeCode: "IPR"`. One row per trial with live `trialStatusCategory`, `terminationDate`, etc.
-2. **Corpus-wide petition row** — `POST /trials/documents/search` filtered to `documentData.documentCategory IN ["PETITION", "Paper"]`, paginated, then grouped by `trialNumber` and run through `pick_petition()` (see `../api/proceedings.md` "Petition coverage and the category-taxonomy drift"). Use **only `documentData.*`** from the picked row — `fileDownloadURI` (stored for v2), `documentFilingDate` (= T₀), `documentNumber`, `documentTitleText`. The `trialMetaData` block on this row is **not** frozen at T₀ (refer to `../api/proceedings.md` "What we observed"); pull all trial / patent / party features from the proceedings row in step 1.
+2. **Corpus-wide petition row** — `POST /trials/documents/search` filtered to `documentData.documentCategory IN ["PETITION", "Paper"]`, paginated, then grouped by `trialNumber` and run through `pick_petition()` (see `../api/proceedings.md` "Petition coverage and the category-taxonomy drift"). Use **only `documentData.*`** from the picked row — `fileDownloadURI`, `documentFilingDate` (= T₀), `documentNumber`, `documentTitleText`. The `trialMetaData` block on this row is **not** frozen at T₀ (refer to `../api/proceedings.md` "What we observed"); pull all trial / patent / party features from the proceedings row in step 1.
+3. **Petition PDF download + extraction** — `GET <documentData.fileDownloadURI>` per picked petition; pdfplumber-extracted text cached under `Stage.PETITION_TEXTS / <trial_number>.txt`; Tier A regex aggregation runs at feature-build time.
 
-> **v2 (deferred): step 3 — `GET <documentData.fileDownloadURI>` per petition + `pdfplumber` extraction → Tier 1/2 features.**
+> **Still deferred (v2):** Tier 1 (richer structural / volumetric counts — n_challenged_claims, n_prior_art_references, declaration-paragraph counts) and Tier 2 (bag-of-words / TF-IDF / transformer embeddings).
 
 ### 5.3 Patent file wrapper API is first-tier
 
@@ -197,7 +217,7 @@ Current first-tier patent-side families:
 
 The corpus-wide `documentData.documentCategory: "PETITION"` filter only catches ~6K of the ~18K IPR trials, because pre-2022 trials use the legacy `Paper` category (which is also a catch-all for all procedural papers). The canonical ingestion path is a **single corpus-wide scan filtered to `documentData.documentCategory IN ["PETITION", "Paper"]`** with the picker applied per trial — validated empirically at 98.7% recall, 0 false positives across 239 stratified trials (see `../api/proceedings.md`). The earlier per-trial draft (18K calls) is superseded by the corpus-wide scan (~3.2K calls) — same coverage, ~6× fewer requests.
 
-**v1 cost model (metadata-only):**
+**v1 cost model:**
 
 | Pass | Calls / size | Bucket | Wall time |
 |---|---:|---|---|
@@ -205,11 +225,12 @@ The corpus-wide `documentData.documentCategory: "PETITION"` filter only catches 
 | Corpus-wide petition scan — `POST /trials/documents/search` filtered to `documentData.documentCategory IN ["PETITION", "Paper"]`, paginated 100/page | ~3.2K calls (~323K rows fetched, ~17.8K kept after `pick_petition()`) | Metadata (5M/wk) | ~25–30 min serial (rate-limit-bound) |
 | FWD decision inventory — `POST /trials/decisions/search` paginated | ~200 calls | Metadata (5M/wk) | ~30 s |
 | FWD text backfill for label fallback | ~1.1K PDFs cold; ~30–50 weekly deltas | File Wrapper Documents (1.2M/wk) | ~1 h cold; <5 min weekly |
+| Petition PDF download + pdfplumber extraction — `GET <fileDownloadURI>` per picked petition | ~18K PDFs cold; ~30–50 weekly deltas | File Wrapper Documents (1.2M/wk) | ~10 h cold; <5 min weekly |
 | Patent file-wrapper enrichment — batched `POST /applications/search` by unique app | ~120 calls for the current ~11.8K-app corpus at page size 100 | Patent metadata bucket | ~3–4 h including response-size bisection / retries |
 
-> **v2 (deferred): petition PDF downloads** — ~18K calls, ~70 GB raw / ~2 GB extracted text, File-Wrapper Documents bucket, ~10 h serial.
+> **Still deferred (v2):** richer Tier 1/2 petition-text features (bag-of-words, embeddings, declaration parsing, exhibit-PDF inspection). Tier A regex extractors are part of the per-petition pdfplumber pass above and add no extra HTTP cost.
 
-Total v1 live-API wall-clock: **~4–5 h on a cold run with FWD-text backfill**, dominated by patent file-wrapper enrichment. Metadata calls sit comfortably inside the 5M/wk cap; the binding constraint is wall-clock from burst=1 serialization and large patent-wrapper responses, not quota. Storage: raw JSON cache + FWD text blobs + feature parquets, all on local FS (and replicable to S3 within free-tier limits). Empirical probe (2026-04-28): the petition-scan stage runs at ~0.85 s/page including the ~5 s 429 backoffs that happen every ~250 pages, so ~3.2K pages = ~25–30 min wall-clock. **This table is canonical for v1 — `../api/rate_limits.md` §2 and `../api/api_feature_map.md` §5 defer to it.**
+Total v1 live-API wall-clock: **~14–15 h on a cold run** (~4–5 h pre-petition-PDFs + ~10 h petition downloads), dominated by petition + patent file-wrapper enrichment. Metadata calls sit comfortably inside the 5M/wk cap; the binding constraint is wall-clock from burst=1 serialization and large response sizes, not quota. Storage: raw JSON cache + FWD text blobs + petition text blobs (~2 GB extracted) + feature parquets, all on local FS (and replicable to S3 within free-tier limits). Empirical probe (2026-04-28): the petition-scan stage runs at ~0.85 s/page including the ~5 s 429 backoffs that happen every ~250 pages, so ~3.2K pages = ~25–30 min wall-clock. **This table is canonical for v1 — `../api/rate_limits.md` §2 and `../api/api_feature_map.md` §5 defer to it.**
 
 ### 5.5 Train / test symmetry
 
@@ -238,7 +259,9 @@ Neither endpoint enforces leakage discipline for us — the API has no T₀-froz
 | `domain_notes.md` | Legal-domain *why* behind features. Reconciled with binary-classification scope and petition-only feature policy. |
 | `../examples/ipr_lifecycle_case_study.md` | Full IPR lifecycle (1,430 days, 145 papers). §9 explicitly lists Phases 3–8 as out-of-scope as feature sources. Orientation only. |
 | `../api/proceedings.md` | Live-vs-frozen distinction between the proceedings and documents endpoints (empirical, 2026-04-26). Proceedings = label / static metadata source; documents/search petition rows contribute only `documentData.*`. |
-| `src/ml_uspto/features/transforms.py` | Current feature builder. Applies T₀ filtering to patent event / assignment arrays after the trial join. |
+| `src/ml_uspto/features/transforms.py` | Current feature builder. T₀ filter on patent arrays + Tier A petition-text aggregation; `_select_usable_rows` drops trials below the petition-text length threshold. |
+| `src/ml_uspto/parse/schemas/patterns.py` | Tier A petition-text regex catalog (grounds, statutes, Sotera, Fintiv) and petition-picker title/blacklist regexes. |
+| `tests/integration/test_petition_text_cached.py` | 124-trial ground-truth audit cohort for the Tier A regexes. |
 | `src/ml_uspto/clients/uspto.py` | API client. Proceedings POST + documents POST + decisions POST + application search + authenticated PDF download are all part of the active surface — distinct roles per `../api/proceedings.md`. |
 
 ## 7. Open questions and sensitivity tests
@@ -248,41 +271,50 @@ Neither endpoint enforces leakage discipline for us — the API has no T₀-froz
 - **Joinder treatment.** Quantify the joinder share of the corpus; decide whether to exclude or include with an `is_joinder` indicator.
 - **Pre / post-2025 regime split.** New discretionary-denial framework took effect June 2025. Either include a regime indicator or fit two regime-specific models and compare.
 - **Time-correct base rates.** Implementation discipline — art-unit / tech-center base-rate features must use only trials with terminating FWDs before T₀, not the full corpus.
-- **Petition-text feature granularity (v2 scope).** v1 ships no petition-text features. v2 starts with bag-of-words / TF-IDF + Tier 1/2 structural counts (claims challenged, prior-art references, ground count). Transformer-based embeddings deferred behind that.
+- **Petition-text feature granularity (v2 scope).** v1 ships Tier A petition-text features (`n_grounds`, `n_grounds_102`, `n_grounds_103`, `has_sotera_stipulation`, `mentions_fintiv_factors`). v2 adds Tier 1 structural counts (`n_challenged_claims`, `n_prior_art_references`, declaration-paragraph counts) and Tier 2 bag-of-words / TF-IDF; transformer-based embeddings deferred behind that.
 
 ## 8. Modeling assumptions and known limitations
 
 These assumptions narrow the scope further than §1–§7 require, in exchange for a much simpler ingestion pipeline. State them upfront when presenting model results so reviewers understand what we *chose* to ignore and what we *had* to ignore.
 
-### 8.1 Petition-text PDF plan is deferred
+### 8.1 Petition-text PDF: petition-only, all other documents skipped
 
-The v2 petition-text plan would open exactly one feature PDF per trial: the petition itself (Paper 3). Optionally a second one — the petitioner's ranking notice — when present. **Current v1 does not open petition PDFs at all.** All other admissible documents are skipped, even though the leakage rule (§4) would allow reading them.
+v1 opens exactly one feature PDF per trial: the petition itself
+(Paper 3). All other admissible documents are skipped, even though
+the leakage rule (§4) would allow reading them. The petition PDF is
+fetched once at ingest time, pdfplumber-extracted to a `.txt` blob
+under `Stage.PETITION_TEXTS`, and consumed at feature-build time by
+the Tier A regex aggregator.
 
 Specifically skipped:
-- **Expert declaration (Ex 1003).** Its content is expanded prose of what the petition already says; the only useful signals (declaration filed? cited paragraph count?) are derivable from the petition's exhibit list and `EX-1003, ¶N` citations.
+- **Expert declaration (Ex 1003).** Its content is expanded prose of what the petition already says; the only useful signals (declaration filed? cited paragraph count?) are derivable from the petition's exhibit list and `EX-1003, ¶N` citations — slated for Tier 1 in v2.
 - **Parallel-lawsuit exhibits (Ex 1031–1034, 1041–1043 in the example trial).** Court captions, trial dates, scheduling information are restated by the petition in §IV (Discretionary Considerations) and §VI.B (Related Matters). The exhibits provide verification, not new categorical features.
 - **Prior-art exhibits (Ex 1004–1030 etc.).** Treated as a count-and-classify list parsed from the petition's exhibit-list section; the prior-art PDFs themselves are never opened.
+- **Petitioner's ranking notice** (multi-petition trials only). Optional second feature PDF in the original v2 plan; not currently fetched.
 - **Power of Attorney, the challenged patent itself, the patent's prosecution history.** Each is either redundant (POA → counsel info already in petition §VI.C) or duplicated by bulk products (`PTFWPRE`).
 
-When v2 lands, petition-only text ingestion drops from the ~50–90 GB worst-case to the petition corpus plus the small ranking-notice tail. In v1, the only text blobs are FWD label-fallback text.
+Empirical disk footprint of the petition-only path: ~2 GB extracted
+text across ~6,366 trials processed at the time of writing
+(p50 = 105K chars per petition; max = 690K). FWD label-fallback text
+adds a few MB.
 
 See `../features/admissible_documents_analysis.md` for the per-document analysis that informed each demotion.
 
-### 8.2 Future Fintiv extraction: advocacy, not adjudication
+### 8.2 Fintiv extraction: advocacy, not adjudication
 
 Fintiv (the rule for refusing IPRs that overlap with parallel court trials) is the most predictive set of features and also the one with the cleanest leakage problem. Two cleaner sources exist (POPR, Institution Decision) but both have `documentFilingDate > T₀` and are excluded.
 
-What v2 should extract is the **petitioner's preemptive framing in petition §IV** — sales pitch, not ruling. Implications:
+What v1 extracts is the **petitioner's preemptive framing in petition §IV** — sales pitch, not ruling. The Tier A `mentions_fintiv_factors` flag fires when ≥3 distinct Fintiv-factor indices appear via any of seven phrasing patterns (keyword-anchored, colon/period-headed, ordinal narrative, line-anchored bare digit, etc.). `has_sotera_stipulation` separately captures the binding-commitment slice. Both are admissible because the petition itself is at T₀. Implications:
 
 - The *thoroughness* of the §IV discussion is itself a feature. A petition that hand-waves Fintiv signals weakness independent of whether its arguments are correct.
 - The Sotera stipulation is the one piece of §IV that's a binding commitment rather than rhetoric, and is therefore unusually high-signal.
 - Ground-truth Fintiv labels (the PTAB's actual factor-by-factor ruling) live in the Institution Decision and are accessible only for evaluation/sanity-check, never as features.
 
-See `ptab_scope_and_terminology.md` §5 for the full Fintiv lifecycle.
+See `ptab_scope_and_terminology.md` §5 for the full Fintiv lifecycle and `../features/features_csv_dictionary.md` §7 for the Tier A pattern catalog.
 
-### 8.3 Lower-precision parallel-lawsuit data in v2
+### 8.3 Lower-precision parallel-lawsuit data in v1
 
-When v2 uses petition-only text and does not open the parallel-lawsuit exhibits, it loses precision on a few derivable features:
+Because v1 uses petition-only text and does not open the parallel-lawsuit exhibits, it loses precision on a few derivable features:
 
 - District-court complaint date is reduced from "exact filing date" to "year" (extracted from case number `21-cv-00701` → 2021).
 - Judge name is captured only when the petition explicitly states it; otherwise inferred from the district.
