@@ -1,6 +1,5 @@
 """Subpackage-local constants for `ml_uspto.features`."""
 
-from datetime import date
 from functools import lru_cache
 
 import yaml
@@ -51,7 +50,6 @@ PATENT_NULLABLE_NUMERIC: tuple[str, ...] = (
 OHE_CATEGORICAL_COLUMNS: tuple[str, ...] = (
     "technology_center",
     "cpc_section",
-    "presidential_regime",
 )
 
 # Frequency: open-vocabulary party identifiers. Counts must be learned
@@ -61,19 +59,17 @@ FREQUENCY_CATEGORICAL_COLUMNS: tuple[str, ...] = (
     "owner_real_party",
 )
 
-# Presidential-regime boundaries — US inauguration dates (Jan 20).
-# Each entry is (administration_start, regime_label); the row-local
-# bucketer in `features.transforms` selects the latest start ≤ T₀.
-# AIA IPR practice begins September 2012, so administrations before
-# Obama are not represented. Trump's two non-consecutive terms are
-# distinct labels because the political/PTAB-policy environment of
-# 2017–2021 and 2025– are not interchangeable for the model.
-PRESIDENTIAL_REGIMES: tuple[tuple[date, str], ...] = (
-    (date(2009, 1, 20), "obama"),
-    (date(2017, 1, 20), "trump_1"),
-    (date(2021, 1, 20), "biden"),
-    (date(2025, 1, 20), "trump_2"),
-)
+# Minimum length (in characters) for a `petition_text` blob to count
+# as usable input for the Tier A regex feature aggregator. Empirically
+# tuned against the 6,366-trial cohort (2026-05-02): unusable rows
+# (literal "BLANK" sentinels written by the ingest driver, all-whitespace
+# pdfplumber output, cover-page-only partial extractions) cluster at
+# ≤ 3,040 chars; the closest real petition observed sits at p01 = 59,117
+# chars, two orders of magnitude above the cut. The 5K threshold is
+# safely below any plausible real petition body and above every observed
+# extraction failure. Currently catches 20/6,366 trials = 0.31%, under
+# the project's <2% drop-policy threshold.
+MIN_PETITION_TEXT_CHARS: int = 5_000
 
 # Output-contract column set produced by
 # `transforms._aggregate_petition_text_row`. Kept here so the feature
@@ -109,7 +105,7 @@ __all__ = [
     "PATENT_NULLABLE_NUMERIC",
     "OHE_CATEGORICAL_COLUMNS",
     "FREQUENCY_CATEGORICAL_COLUMNS",
-    "PRESIDENTIAL_REGIMES",
+    "MIN_PETITION_TEXT_CHARS",
     "PETITION_TEXT_FEATURE_KEYS",
     "EVENT_CODE_CATEGORIES",
     "BANNED_EVENT_CATEGORIES",

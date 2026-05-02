@@ -1,11 +1,10 @@
 """Compiled regex patterns for `ml_uspto.parse`.
 
-`PETITION_TITLE` / `BLACKLIST` are sourced from
-`config/petition_picker.yaml` (cross-cutting taxonomy — domain-revisable
-without code review). The petition-text Tier A patterns are inline
-Python literals: they're internal regex extractors over filed-document
-text, not domain-revisable taxonomies, so they live next to the function
-that consumes them (`features.transforms._aggregate_petition_text_row`).
+All patterns are inline Python literals — internal regex extractors over
+filed-document text, kept next to the code that consumes them rather
+than in YAML. The non-regex petition-picker config (paper-number
+ceiling, exhibit-category strings) stays in `config/petition_picker.yaml`
+and is exposed via `ml_uspto.parse.schemas.constants`.
 
 Empirical reference values from IPR2022-01002 (Samsung+Apple v.
 Smart Mobile, '083 patent) — the canonical regression case for the
@@ -18,23 +17,54 @@ petition-text patterns:
 """
 
 import re
-from functools import lru_cache
-
-import yaml
-
-from ml_uspto import paths
 
 
-@lru_cache(maxsize=1)
-def _load_petition_picker() -> dict:
-    with open(paths.PETITION_PICKER_YAML) as f:
-        return yaml.safe_load(f)
+# ---------------------------------------------------------------------------
+# Petition-picker title regexes (consumed by `parse.petitions`)
+#
+# Real petition titles take many shapes (`Petition for IPR`,
+# `[PUBLIC] Petition for IPR`, `Inter Partes Review Petition of …`,
+# `IPR Petition - <party> <patent#>`, `Corrected Petition for IPR`); a
+# tighter regex empirically over-rejects. False-positives within the
+# PETITION+Paper bucket are caught by `BLACKLIST` below (Ranking
+# Documents, post-decision petitions, etc.).
+# ---------------------------------------------------------------------------
 
+PETITION_TITLE: re.Pattern[str] = re.compile(
+    r"\bpetition\b"
+    r"|\binter\s+part(?:e|ie)s\s+review\s+of\b"
+    r"|\brequest\s+for\s+(?:inter\s+part(?:e|ie)s\s+review|ipr)\b",
+    re.I,
+)
 
-_cfg = _load_petition_picker()
-
-PETITION_TITLE: re.Pattern[str] = re.compile("|".join(_cfg["title_alternatives"]), re.I)
-BLACKLIST: re.Pattern[str] = re.compile("|".join(_cfg["blacklist_alternatives"]), re.I)
+# The `petitioner['']?s\s+(?!petition\b)` clause uses a negative lookahead so
+# "Petitioner's Reply" / "Petitioner's Mandatory Notices" / etc. are rejected
+# while "Petitioner's Petition for Inter Partes Review" passes through.
+#
+# `Petitioner's Petition Ranking and Explanation of Material Differences`
+# is a procedural multi-petition filing (37 CFR §42.108), NOT the
+# operative petition. The `petitioner['s] (?!petition)` clause above
+# doesn't catch it (next word IS `petition`), so we blacklist `petition
+# ranking` explicitly.
+BLACKLIST: re.Pattern[str] = re.compile(
+    r"power of attorney"
+    r"|notice of appeal"
+    r"|petitioner['’]?s\s+(?!petition\b)"
+    r"|notice of (filing date accorded|accord)"
+    r"|request for (refund|rehearing)"
+    r"|sur-?reply"
+    r"|surreply"
+    r"|response to petition"
+    r"|denying institution"
+    r"|institution of inter partes"
+    r"|motion for joinder"
+    r"|grant of motion for joinder"
+    r"|petition for reconsideration"
+    r"|petition for rehearing"
+    r"|petition for joinder"
+    r"|petition ranking",
+    re.I,
+)
 
 
 # ---------------------------------------------------------------------------

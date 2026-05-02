@@ -129,7 +129,6 @@ class FeatureRow(BaseModel):
 
     filing_year: int | None = None
     filing_month: int | None = None
-    filing_dayofweek: int | None = None
     art_unit_group: int | None = None
 
     days_grant_to_petition: int | None = None

@@ -31,7 +31,6 @@ def _frame(
             "owner_real_party": ["O"] * len(petitioners),
             "technology_center": technology_centers,
             "cpc_section": cpc_sections,
-            "presidential_regime": ["A"] * len(petitioners),
             "n_events_pre_t0": n_events,
         }
     )

@@ -214,8 +214,8 @@ def test_overall_resolution_rate(manifest_entries: list[dict]) -> None:
         f"Quarantine rate {quarantine_rate:.1%} exceeds ceiling "
         f"{QUARANTINE_RATE_CEILING:.0%}. Quarantined: {quarantined}. "
         "Either a new cover-page format surfaced (extend "
-        "config/labels.yaml::fwd_pdf_outcome.patterns) or pdfplumber "
-        "regressed on a vintage."
+        "src/ml_uspto/schemas/patterns.py::FWD_PDF_OUTCOME_PATTERNS) or "
+        "pdfplumber regressed on a vintage."
     )
     assert n_title_agree == n_title_parseable, (
         f"Disagreement on {n_title_parseable - n_title_agree}/"

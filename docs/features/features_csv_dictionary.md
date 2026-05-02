@@ -36,15 +36,19 @@ non-banned event categories are the only ones counted.
 
 ---
 
-## 1. Petition-timing features (3)
+## 1. Petition-timing features (2)
 
-Derived from `petition_filing_date` (the trial's T₀).
+Derived from `petition_filing_date` (the trial's T₀). `filing_dayofweek`
+was dropped (no plausible IPR mechanism) and `presidential_regime` was
+dropped as a low-resolution era proxy with bucket boundaries (Jan-20
+inaugurations) misaligned with the actual policy-event dates that
+matter (Fintiv May 2020, Vidal memo June 2022). Era control is carried
+by `filing_year`; `filing_month` captures intra-year seasonality.
 
 | Column | Type | Meaning |
 |---|---|---|
 | `filing_year` | nullable int | Year the petition was filed (2012–2026). |
-| `filing_month` | nullable int | Month of petition filing (1–12). |
-| `filing_dayofweek` | nullable int | Day-of-week (0=Mon, 6=Sun). |
+| `filing_month` | nullable int | Month of petition filing (1–12). Captures §315(b) one-year-from-complaint bunching, USPTO fiscal-year boundary (Sept 30), holiday slowdowns, and Director-memo timing within a year. |
 
 ## 2. Art-unit prefix (1)
 
@@ -114,6 +118,56 @@ them per fold; do not encode them yourself before splitting.
 | `petitioner_real_party` | `FrequencyEncoder` | Open-vocabulary string. ~3,500 distinct values in the current corpus; long tail. |
 | `owner_real_party` | `FrequencyEncoder` | Open-vocabulary string. ~3,900 distinct values. NaN (~0.5%) maps to count 0 at transform time. |
 
+## 7. Tier A petition-text features (5)
+
+Row-local regex extractions over the pdfplumber-extracted petition body
+text (joined onto the trial frame from `Frame.PETITION_TEXTS`). Pattern
+catalog and audit history live in `src/ml_uspto/parse/schemas/patterns.py`
+and `tests/integration/test_petition_text_cached.py` (124-trial
+ground-truth cohort).
+
+| Column | Type | Meaning |
+|---|---|---|
+| `n_grounds` | int | Distinct ground indices in the petition's grounds-table headers (`Ground 1`, `Ground 2`, `Challenge #N`, `Grounds N and M`). |
+| `n_grounds_102` | int | Count of §102 (anticipation) statute citations in ground headers / status tables. |
+| `n_grounds_103` | int | Count of §103 (obviousness) statute citations. Modal IPR challenge type. |
+| `has_sotera_stipulation` | int (0/1) | 1 if the petition contains a Sotera-style stipulation ("will not pursue / cease asserting … invalidity / grounds" in parallel district-court litigation). Essentially impossible pre-2021 (Sotera Wireless precedential Dec 2020). |
+| `mentions_fintiv_factors` | int (0/1) | 1 if ≥3 distinct Fintiv-factor indices (1–6) appear via any of seven phrasing patterns (keyword-anchored, colon/period-headed, ordinal narrative, line-anchored bare digit, etc.). Captures whether the petitioner pre-emptively addresses §314(a) discretionary-denial risk. |
+
+### Drop policy: trials with unusable petition text
+
+Rows whose `petition_text` is shorter than `MIN_PETITION_TEXT_CHARS`
+(currently 5,000) are **dropped from the feature matrix entirely** by
+`features.transforms.select_usable_rows`, called from
+`drivers/run_features.py` before `build_features`. Sources of unusable
+text and why we drop rather than zero-fill:
+
+- **Cache miss** — the petition-text ingest hasn't run yet for this trial;
+  `Frame.PETITION_TEXTS` has no row, so the joiner's left-join leaves
+  `petition_text` NaN.
+- **`BLANK` sentinel** (5-char literal) — written by the ingest driver
+  for scanned-image PDFs that pdfplumber can't decode.
+- **All-whitespace output** — pdfplumber found a text layer but extracted
+  only newlines (60–106 chars typical).
+- **Cover-page-only partial extraction** — DocuSign envelope or caption
+  page only, body never reached the parser (≤3K chars).
+
+Empirically tuned against the 6,366-trial steady-state cohort
+(2026-05-02): unusable rows cluster at `len ≤ 3,040`; the closest real
+petition observed sits at p01 ≈ 59,117 chars, two orders of magnitude
+above the cut. The 5K threshold catches every observed extraction
+failure (20/6,366 = 0.31%) without risk of dropping any real petition.
+Below the project's <2% drop-policy threshold.
+
+**Why drop rather than zero-fill or impute:** a zero-filled row
+masquerades as a real measurement of "petition raised 0 grounds, no
+Sotera stipulation, no Fintiv mention." Zero is impossible for a real
+petition (every petition has ≥1 ground by definition), so the model
+would otherwise learn "all-zero petition-text features" as a signal
+correlated with the ingest-failure subpopulation rather than petition
+characteristics. The threshold lives in
+`src/ml_uspto/features/schemas/constants.py::MIN_PETITION_TEXT_CHARS`.
+
 ---
 
 ## Generation
@@ -160,7 +214,11 @@ to prevent.
 - `src/ml_uspto/features/schemas/enums.py` — `EventCategory` definition.
 - `src/ml_uspto/features/schemas/constants.py` — `OHE_CATEGORICAL_COLUMNS`,
   `FREQUENCY_CATEGORICAL_COLUMNS`, `PATENT_NULLABLE_NUMERIC`,
-  `PATENT_COUNT_FEATURES`.
+  `PATENT_COUNT_FEATURES`, `PETITION_TEXT_FEATURE_KEYS`,
+  `MIN_PETITION_TEXT_CHARS`.
+- `src/ml_uspto/parse/schemas/patterns.py` — Tier A petition-text regex
+  catalog (`PETITION_GROUND_HEADER_PATTERN`, `PETITION_SOTERA_PATTERNS`,
+  the seven Fintiv-factor patterns, etc.).
 - `src/ml_uspto/models/preprocessing.py` — the modeling-side
   `build_preprocessor()` / `build_pipeline()` that turn this
   intermediate into the final design matrix per fold.

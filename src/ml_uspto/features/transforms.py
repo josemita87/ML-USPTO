@@ -19,11 +19,11 @@ from ml_uspto.features.schemas.constants import (
     BANNED_EVENT_CATEGORIES,
     EVENT_CODE_CATEGORIES,
     FREQUENCY_CATEGORICAL_COLUMNS,
+    MIN_PETITION_TEXT_CHARS,
     OHE_CATEGORICAL_COLUMNS,
     PATENT_COUNT_FEATURES,
     PATENT_NULLABLE_NUMERIC,
     PETITION_TEXT_FEATURE_KEYS,
-    PRESIDENTIAL_REGIMES,
     TRIAL_EVENT_PREFIXES,
 )
 from ml_uspto.features.schemas.enums import EventCategory
@@ -72,18 +72,6 @@ def _event_category(code: str) -> EventCategory:
     if any(code.startswith(prefix) for prefix in TRIAL_EVENT_PREFIXES):
         return EventCategory.TRIAL
     return EVENT_CODE_CATEGORIES.get(code, EventCategory.OTHER)
-
-
-def _presidential_regime(d: date | None) -> str | None:
-    if d is None:
-        return None
-    label: str | None = None
-    for start, name in PRESIDENTIAL_REGIMES:
-        if d >= start:
-            label = name
-        else:
-            break
-    return label
 
 
 def _normalize_assignee(name: str) -> str:
@@ -214,24 +202,30 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     note and `docs/features/patent_file_wrapper_features.md`
     §"Missingness semantics" for the four-regime missingness model.
 
+    Trials whose `petition_text` is too short for Tier A regex extraction
+    (cache miss, BLANK sentinel, all-whitespace, cover-page-only partial)
+    are dropped here per `_select_usable_rows`; the returned frame's
+    `trial_number` column is the join key for downstream label
+    attachment.
+
     Args:
         df: Joined frame from `parse.joiner.join_all`.
 
     Returns:
-        Feature frame with calendar/row-local numerics
-        (`filing_year`, `filing_month`, `filing_dayofweek`,
-        `art_unit_group`); T₀-filtered patent aggregates
-        (`n_*_pre_t0`, `n_office_actions`,
+        Feature frame, `trial_number`-keyed, with calendar/row-local
+        numerics (`filing_year`, `filing_month`, `art_unit_group`);
+        T₀-filtered patent aggregates (`n_*_pre_t0`, `n_office_actions`,
         `n_distinct_assignees_pre_t0`, `n_parent_applications`);
         nullable scalars (`prosecution_span_days`,
         `days_grant_to_petition`, `days_since_last_assignment`) paired
         with their `_missing` regime indicators set *before* any
         imputation; raw categoricals for the downstream encoder
-        (`technology_center`, `cpc_section`, `presidential_regime`,
+        (`technology_center`, `cpc_section`,
         `petitioner_real_party`, `owner_real_party`). The label column
-        (`cancelled`) is not
-        part of the returned frame — callers attach it back from `df`.
+        (`cancelled`) is not part of the returned frame — callers join
+        it back via `trial_number`.
     """
+    df = _select_usable_rows(df)
     patent_features = _aggregate_patents(df)
     augmented = pd.concat(
         [df.reset_index(drop=True), patent_features.reset_index(drop=True)],
@@ -240,14 +234,22 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
 
     features = pd.DataFrame(index=augmented.index)
 
+    # `trial_number` is the join key for downstream label / audit
+    # attachment. After `_select_usable_rows` the row count no longer
+    # matches the input joined frame, so positional alignment is unsafe;
+    # callers must merge on `trial_number`.
+    if "trial_number" in augmented.columns:
+        features["trial_number"] = augmented["trial_number"].astype(str)
+
     if "petition_filing_date" in augmented.columns:
         pf = pd.to_datetime(augmented["petition_filing_date"], errors="coerce")
         features["filing_year"] = pf.dt.year.astype("Int64")
+        # Month captures intra-year seasonality the year column can't:
+        # §315(b) one-year-from-complaint bunching, USPTO fiscal-year
+        # boundary (Sept 30), holiday slowdowns, and Director-memo timing
+        # within a year (e.g. Vidal memo June 2022 splits 2022 into a
+        # pre/post-Fintiv-relaxation half).
         features["filing_month"] = pf.dt.month.astype("Int64")
-        features["filing_dayofweek"] = pf.dt.dayofweek.astype("Int64")
-        features["presidential_regime"] = (
-            augmented["petition_filing_date"].map(to_date).map(_presidential_regime)
-        )
 
     if "group_art_unit" in augmented.columns:
         features["art_unit_group"] = pd.to_numeric(
@@ -296,9 +298,9 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
             values = augmented[col].astype(object)
             features[col] = values.where(values.notna(), np.nan)
 
-    # Tier A petition-text features. The joiner attaches `petition_text`
-    # from `Frame.PETITION_TEXTS`; rows with no cached text get NaN, so
-    # the regex aggregator falls back to 0 per its empty-text branch.
+    # Tier A petition-text features. Callers are expected to have run
+    # `select_usable_rows` upstream so every surviving row carries a
+    # real petition_text body — no missing-data branch here.
     if "petition_text" in augmented.columns:
         text_features = pd.DataFrame(
             list(augmented["petition_text"].map(_aggregate_petition_text_row)),
@@ -311,6 +313,56 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     return features
 
 
+def _select_usable_rows(joined: pd.DataFrame) -> pd.DataFrame:
+    """Drop rows whose `petition_text` is too short for Tier A regex extraction.
+
+    Internal to `build_features` — the petition-text length threshold
+    is a feature-pipeline implementation detail, not a driver concern.
+
+    `_aggregate_petition_text_row` requires a real petition body to
+    produce meaningful counts. Upstream sources of unusable text:
+      - cache miss (no row in `Frame.PETITION_TEXTS` for this trial);
+      - ingest-driver "BLANK" sentinels for scanned-image PDFs that
+        pdfplumber can't decode;
+      - all-whitespace pdfplumber output;
+      - cover-page-only partial extractions (DocuSign envelope, caption
+        page) where the body never reached the parser.
+    All of these collapse to `len(text) < MIN_PETITION_TEXT_CHARS`. Real
+    petitions sit two orders of magnitude above the cut (p01 ≈ 59K chars
+    on the 6,366-trial cohort). Dropping these rows is the project's
+    documented policy (`docs/features/features_csv_dictionary.md` §7) —
+    preferred over zero-filling because zero-filled rows masquerade as
+    "petition raised 0 grounds, no Sotera, no Fintiv," which the model
+    would learn as a pattern correlated with the ingest-failure
+    subpopulation.
+
+    Args:
+        joined: Joined frame from `parse.joiner.join_all`. Must carry
+            a `petition_text` column.
+
+    Returns:
+        A copy of `joined` filtered to rows whose `petition_text` is a
+        string of at least `MIN_PETITION_TEXT_CHARS` characters.
+    """
+    if "petition_text" not in joined.columns:
+        # No-op when the column is absent — matches `build_features`'s
+        # conditional Tier A path (a fixture or audit caller may pass
+        # a petition-text-free frame deliberately).
+        return joined
+    text = joined["petition_text"]
+    str_mask = text.apply(lambda v: isinstance(v, str))
+    long_enough = str_mask & (text.fillna("").str.len() >= MIN_PETITION_TEXT_CHARS)
+    n_dropped = int((~long_enough).sum())
+    if n_dropped:
+        logger.info(
+            "Dropped %d/%d trials (%.2f%%) whose petition_text < %d chars "
+            "(no cache hit, ingest BLANK sentinel, or extraction failure)",
+            n_dropped, len(joined), n_dropped / max(len(joined), 1) * 100,
+            MIN_PETITION_TEXT_CHARS,
+        )
+    return joined.loc[long_enough].copy()
+
+
 # ---------------------------------------------------------------------------
 # Tier A petition-text features
 #
@@ -320,17 +372,15 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 
-def _aggregate_petition_text_row(text: object) -> dict[str, int]:
+def _aggregate_petition_text_row(text: str) -> dict[str, int]:
     """Run the Tier A regex set over one petition's pdfplumber-extracted text.
 
-    Mirrors `_aggregate_patent_row`: row-local, no I/O, NaN/None text
-    treated as empty (every feature falls back to 0). Booleans are
-    cast to 0/1 so the result drops straight into a numeric DataFrame
-    column.
+    Mirrors `_aggregate_patent_row`: row-local, no I/O. Callers must
+    run `select_usable_rows` upstream — this aggregator assumes `text`
+    is a real petition body (no missing/empty/short-text branch).
+    Booleans are cast to 0/1 so the result drops straight into a
+    numeric DataFrame column.
     """
-    if not isinstance(text, str) or not text:
-        return {k: 0 for k in PETITION_TEXT_FEATURE_KEYS}
-
     # Four capture groups across three branches: group(1) is the
     # "Ground N" digit, group(2) is the "Challenge #N" digit, groups
     # (3) and (4) are both digits from a "Grounds N and M" plural-form

@@ -1,8 +1,15 @@
-"""Tests for the Tier A petition-text regex aggregator in `features.transforms`."""
+"""Tests for the Tier A petition-text regex aggregator + the upstream usability filter."""
 
 from __future__ import annotations
 
-from ml_uspto.features.transforms import _aggregate_petition_text_row as extract_petition_text_features
+import numpy as np
+import pandas as pd
+
+from ml_uspto.features.schemas.constants import MIN_PETITION_TEXT_CHARS
+from ml_uspto.features.transforms import (
+    _aggregate_petition_text_row as extract_petition_text_features,
+)
+from ml_uspto.features.transforms import _select_usable_rows
 
 
 def test_n_grounds_dedupes_repeated_citations():
@@ -78,23 +85,6 @@ def test_fintiv_passing_mention_does_not_fire():
     assert feat["mentions_fintiv_factors"] == 0
 
 
-def test_empty_text_returns_default_row():
-    """Empty/garbled text returns defaults — never raises."""
-    feat = extract_petition_text_features("")
-    assert feat["n_grounds"] == 0
-    assert feat["n_grounds_102"] == 0
-    assert feat["n_grounds_103"] == 0
-    assert feat["has_sotera_stipulation"] == 0
-    assert feat["mentions_fintiv_factors"] == 0
-
-
-def test_non_string_input_returns_default_row():
-    """NaN / None / non-string input returns defaults — joiner can attach NaN."""
-    feat = extract_petition_text_features(None)
-    assert feat["n_grounds"] == 0
-    assert feat["has_sotera_stipulation"] == 0
-
-
 def test_ipr2022_01002_regression():
     """Canonical regression — extracted features match the case-study reference values.
 
@@ -124,3 +114,60 @@ def test_ipr2022_01002_regression():
     assert feat["n_grounds_102"] == 0
     assert feat["has_sotera_stipulation"] == 1
     assert feat["mentions_fintiv_factors"] == 1
+
+
+# ---------------------------------------------------------------------------
+# select_usable_rows — upstream filter that gates the aggregator
+# ---------------------------------------------------------------------------
+
+
+def _frame_with_texts(texts: list[object]) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "trial_number": [f"IPR2024-{i:05d}" for i in range(len(texts))],
+            "petition_text": texts,
+        }
+    )
+
+
+def test_select_usable_rows_drops_nan_and_blank_sentinel():
+    """NaN cache misses and the ingest driver's literal 'BLANK' sentinel both drop."""
+    frame = _frame_with_texts([np.nan, "BLANK", "x" * MIN_PETITION_TEXT_CHARS])
+    out = _select_usable_rows(frame)
+    assert list(out["trial_number"]) == ["IPR2024-00002"]
+
+
+def test_select_usable_rows_drops_whitespace_only_short_text():
+    """All-whitespace pdfplumber output is below the threshold and drops."""
+    frame = _frame_with_texts(["\n" * 100, "x" * MIN_PETITION_TEXT_CHARS])
+    out = _select_usable_rows(frame)
+    assert len(out) == 1
+
+
+def test_select_usable_rows_keeps_text_at_threshold():
+    """Text whose length equals the threshold is the inclusion boundary."""
+    frame = _frame_with_texts(
+        [
+            "x" * (MIN_PETITION_TEXT_CHARS - 1),
+            "x" * MIN_PETITION_TEXT_CHARS,
+            "x" * (MIN_PETITION_TEXT_CHARS + 1),
+        ]
+    )
+    out = _select_usable_rows(frame)
+    assert list(out["trial_number"]) == ["IPR2024-00001", "IPR2024-00002"]
+
+
+def test_select_usable_rows_no_op_when_column_missing():
+    """Missing `petition_text` column → no-op, mirrors the conditional Tier A path."""
+    frame = pd.DataFrame({"trial_number": ["IPR2024-00001"]})
+    out = _select_usable_rows(frame)
+    assert len(out) == 1
+    assert list(out.columns) == ["trial_number"]
+
+
+def test_select_usable_rows_returns_copy():
+    """Mutating the returned frame must not write back through to the input."""
+    frame = _frame_with_texts(["x" * MIN_PETITION_TEXT_CHARS])
+    out = _select_usable_rows(frame)
+    out.iloc[0, out.columns.get_loc("petition_text")] = "mutated"
+    assert frame.iloc[0]["petition_text"] != "mutated"

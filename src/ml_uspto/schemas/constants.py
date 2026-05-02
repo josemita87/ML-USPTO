@@ -42,8 +42,14 @@ ALL_CLAIMS_UNPATENTABLE_OUTCOMES: frozenset[str] = frozenset(
     _labels["all_claims_unpatentable_outcomes"]
 )
 
-FWD_PDF_COVER_PAGE_SEARCH_CHARS: int = int(_labels["fwd_pdf_outcome"]["cover_page_search_chars"])
-LEGACY_FWD_ORDER_SEARCH_CHARS: int = int(_labels["fwd_pdf_outcome_legacy"]["tail_search_chars"])
+# Search-window caps for the FWD-outcome regex passes in
+# `ml_uspto.schemas.patterns`. Empirically tuned against the 200-PDF
+# stratified validation sample — the cover-page cap blocks stray
+# "Determining …" citations in body text from overriding the cover
+# ruling; the tail cap blocks body-text "shown to be unpatentable"
+# discussion from leaking into the ORDER-clause search.
+FWD_PDF_COVER_PAGE_SEARCH_CHARS: int = 4000
+LEGACY_FWD_ORDER_SEARCH_CHARS: int = 10000
 
 # boto3 ClientError codes that signal "key does not exist" across S3 ops.
 # Mechanical AWS-API mapping — not domain-revisable, so it's a Python
