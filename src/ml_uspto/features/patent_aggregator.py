@@ -1,14 +1,11 @@
 """Patent-side T₀ row-local aggregation for the joined frame.
 
-Reads the parallel-array patent columns the joiner attaches from
-`Frame.PATENTS` and produces per-row counts/spans that respect the
-T₀ leakage cut (events at or after `petition_filing_date` are
-dropped). No cross-row corpus statistics — every output is a function
-of one row's own raw fields.
+See `docs/engineering/features/patent_file_wrapper_features.md`.
 """
 
 from __future__ import annotations
 
+import logging
 from datetime import date
 
 import pandas as pd
@@ -22,35 +19,43 @@ from ml_uspto.features.schemas.enums import NON_TRIAL_CATEGORIES, EventCategory
 from ml_uspto.features.schemas.patterns import NORMALIZE_NON_ALNUM
 from ml_uspto.utils import as_list, to_date
 
+logger = logging.getLogger(__name__)
+
+
+def select_with_file_wrapper(joined: pd.DataFrame) -> pd.DataFrame:
+    """Drop rows whose `application_number` did not match any row in `Frame.PATENTS`.
+
+    Mirrors `select_usable_rows` for petition text — fill-with-0 would
+    encode "wrapper not fetched" as "patent had zero events".
+    """
+    if "application_number" not in joined.columns:
+        raise KeyError(
+            "select_with_file_wrapper requires an 'application_number' column "
+            "on the joined frame; patent-side features are mandatory in build_features"
+        )
+    has_wrapper = joined["application_number"].notna()
+    n_dropped = int((~has_wrapper).sum())
+    if n_dropped:
+        logger.info(
+            "Dropped %d/%d trials (%.2f%%) with no patent file wrapper "
+            "(application_number unmatched in Frame.PATENTS)",
+            n_dropped, len(joined), n_dropped / max(len(joined), 1) * 100,
+        )
+    return joined.loc[has_wrapper].copy()
+
 
 def _aggregate_patent_row(row: pd.Series) -> dict[str, object]:
-    """Apply T₀ leakage discipline + count/span aggregation to one joined-frame row.
-
-    T₀ enforcement (per `docs/scope/prediction_scope.md` §4): events
-    whose `event_date >= T₀` are dropped before counting, as are events
-    whose codes start with a `TRIAL_EVENT_PREFIXES` value or fall in
-    `BANNED_EVENT_CATEGORIES`. Assignments require
-    `assignment_received_date < T₀` OR `assignment_recorded_date < T₀`
-    to count.
-
-    Args:
-        row: A single row of the joined frame, carrying
-            `petition_filing_date` (T₀) and the patent parallel-array
-            columns. NaN/missing arrays are treated as empty.
-
-    Returns:
-        Mapping of aggregated feature names to values for this row.
-    """
+    """T₀ leakage filter + count/span aggregation for one joined-frame row."""
     counts: dict[EventCategory, int] = {cat: 0 for cat in NON_TRIAL_CATEGORIES}
 
     t0 = to_date(row.get("petition_filing_date"))
     if t0 is None:
         return {
-            "n_events_pre_t0": 0,
+            "n_events": 0,
             "prosecution_span_days": None,
-            **{f"n_{cat.value.lower()}_pre_t0": 0 for cat in NON_TRIAL_CATEGORIES},
-            "n_assignments_pre_t0": 0,
-            "n_distinct_assignees_pre_t0": 0,
+            **{f"n_{cat.value.lower()}": 0 for cat in NON_TRIAL_CATEGORIES},
+            "n_assignments": 0,
+            "n_distinct_assignees": 0,
             "days_since_last_assignment": None,
             "days_grant_to_petition": None,
             "n_parent_applications": 0,
@@ -120,11 +125,11 @@ def _aggregate_patent_row(row: pd.Series) -> dict[str, object]:
     )
 
     return {
-        "n_events_pre_t0": sum(counts.values()),
+        "n_events": sum(counts.values()),
         "prosecution_span_days": prosecution_span_days,
-        **{f"n_{cat.value.lower()}_pre_t0": n for cat, n in counts.items()},
-        "n_assignments_pre_t0": len(pre_t0_assignment_dates),
-        "n_distinct_assignees_pre_t0": len(distinct_assignees),
+        **{f"n_{cat.value.lower()}": n for cat, n in counts.items()},
+        "n_assignments": len(pre_t0_assignment_dates),
+        "n_distinct_assignees": len(distinct_assignees),
         "days_since_last_assignment": days_since_last_assignment,
         "days_grant_to_petition": days_grant_to_petition,
         "n_parent_applications": len(as_list(row.get("parent_app_numbers"))),
@@ -138,4 +143,4 @@ def aggregate_patents(joined: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows, index=joined.index)
 
 
-__all__ = ["aggregate_patents"]
+__all__ = ["aggregate_patents", "select_with_file_wrapper"]

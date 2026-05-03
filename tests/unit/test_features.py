@@ -17,7 +17,9 @@ emits — proceedings/petition cols + the patent parallel arrays.
 from datetime import date
 
 import pandas as pd
+import pytest
 
+from ml_uspto.features.patent_aggregator import select_with_file_wrapper
 from ml_uspto.features.transforms import build_features
 
 
@@ -71,6 +73,10 @@ def _joined_frame() -> pd.DataFrame:
                     ["Post T0 LLC"],                # post-T₀ → drop entirely
                 ],
                 "parent_app_numbers": ["11111111", "22222222"],
+                # Minimum-length filler so `select_usable_rows` keeps the row.
+                # Tier A regex outputs are not under test here — patent-side
+                # T₀ aggregation and calendar/categorical pass-through are.
+                "petition_text": "x" * 5_000,
             },
         ]
     )
@@ -81,20 +87,20 @@ def test_t0_filter_drops_post_t0_trial_and_banned_events():
     features = build_features(_joined_frame())
 
     # 5 surviving events: IEXX (PE), CTNF (EX), WIDS (AA), M2551 (MAINT), ZZZZ (OTHER).
-    assert features["n_events_pre_t0"].iloc[0] == 5
-    assert features["n_pe_pre_t0"].iloc[0] == 1
-    assert features["n_ex_pre_t0"].iloc[0] == 1
-    assert features["n_aa_pre_t0"].iloc[0] == 1
-    assert features["n_maint_pre_t0"].iloc[0] == 1
-    assert features["n_other_pre_t0"].iloc[0] == 1
+    assert features["n_events"].iloc[0] == 5
+    assert features["n_pe"].iloc[0] == 1
+    assert features["n_ex"].iloc[0] == 1
+    assert features["n_aa"].iloc[0] == 1
+    assert features["n_maint"].iloc[0] == 1
+    assert features["n_other"].iloc[0] == 1
 
 
 def test_assignments_drop_post_t0_and_dedup_assignees():
     """Post-T0 assignments drop and pre-T0 assignee variants normalize to one key."""
     features = build_features(_joined_frame())
 
-    assert features["n_assignments_pre_t0"].iloc[0] == 1
-    assert features["n_distinct_assignees_pre_t0"].iloc[0] == 1
+    assert features["n_assignments"].iloc[0] == 1
+    assert features["n_distinct_assignees"].iloc[0] == 1
     # Earliest pre-T₀ date for the surviving assignment is 2018-01-01.
     assert features["days_since_last_assignment"].iloc[0] == (
         date(2022, 5, 23) - date(2018, 1, 1)
@@ -149,4 +155,34 @@ def test_no_recorded_assignment_regime_indicator():
     df.at[0, "assignees_per_assignment"] = []
     features = build_features(df)
     assert features["no_recorded_assignment"].iloc[0] == 1
-    assert features["n_assignments_pre_t0"].iloc[0] == 0
+    assert features["n_assignments"].iloc[0] == 0
+
+
+def test_select_with_file_wrapper_drops_unmatched_application_number():
+    """Trials with NaN application_number (joiner left-join miss) are dropped."""
+    df = pd.DataFrame(
+        {
+            "trial_number": ["IPR2024-00001", "IPR2024-00002"],
+            "application_number": ["14709428", None],
+        }
+    )
+    out = select_with_file_wrapper(df)
+    assert list(out["trial_number"]) == ["IPR2024-00001"]
+
+
+def test_select_with_file_wrapper_raises_when_column_missing():
+    """Missing `application_number` is a pipeline bug — patent features are mandatory."""
+    frame = pd.DataFrame({"trial_number": ["IPR2024-00001"]})
+    with pytest.raises(KeyError, match="application_number"):
+        select_with_file_wrapper(frame)
+
+
+def test_build_features_drops_no_wrapper_row_via_filter():
+    """End-to-end: build_features chains the wrapper filter; unmatched rows disappear."""
+    df = _joined_frame()
+    no_wrapper_row = df.iloc[0].copy()
+    no_wrapper_row["trial_number"] = "IPR2024-99999"
+    no_wrapper_row["application_number"] = None
+    df = pd.concat([df, no_wrapper_row.to_frame().T], ignore_index=True)
+    features = build_features(df)
+    assert list(features["trial_number"]) == ["IPR2022-01002"]

@@ -3,8 +3,8 @@
 # Each event in a patent's file wrapper carries a 4-to-8 character `eventCode`
 # (DOCK, CTNF, M2551, ...). USPTO publishes ~1,873 distinct codes across
 # 275M historical events. We bucket them into 6 categories + a TRIAL ban
-# list and emit per-category counts as features (`n_ex_pre_t0`,
-# `n_aa_pre_t0`, ...) instead of one column per raw code.
+# list and emit per-category counts as features (`n_ex`,
+# `n_aa`, ...) instead of one column per raw code.
 #
 # Categories (USPTO Appendix B official taxonomy + 2 additions):
 #   EX     examination          office actions, IDS, RCE, allowance

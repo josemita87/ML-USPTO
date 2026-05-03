@@ -97,16 +97,16 @@ which is row-local missingness — these counts safely 0-fill in
 
 | Column | Bucket | Meaning |
 |---|---|---|
-| `n_events_pre_t0` | total | All non-TRIAL events before T₀. |
-| `n_ex_pre_t0` | EX | Examination events (office actions, IDS, RCE, allowance). |
-| `n_aa_pre_t0` | AA | Applicant actions (amendments, applicant fees, petitions). |
-| `n_pe_pre_t0` | PE | Pre-examination (filing receipt, scanning, OIPE). |
-| `n_ad_pre_t0` | AD | Administrative (emails, electronic-review, indicators). |
-| `n_iss_pre_t0` | ISS | Issuance events (drawings, ready-for-issue, issue fee). |
-| `n_maint_pre_t0` | MAINT | Post-grant maintenance-fee events. |
-| `n_other_pre_t0` | OTHER | Unmapped codes (~19% of events as of 2026-04-28). |
-| `n_assignments_pre_t0` | — | Pre-T₀ entries in `assignmentBag`. |
-| `n_distinct_assignees_pre_t0` | — | Distinct (normalized) assignee strings across pre-T₀ assignments. |
+| `n_events` | total | All non-TRIAL events before T₀. |
+| `n_ex` | EX | Examination events (office actions, IDS, RCE, allowance). |
+| `n_aa` | AA | Applicant actions (amendments, applicant fees, petitions). |
+| `n_pe` | PE | Pre-examination (filing receipt, scanning, OIPE). |
+| `n_ad` | AD | Administrative (emails, electronic-review, indicators). |
+| `n_iss` | ISS | Issuance events (drawings, ready-for-issue, issue fee). |
+| `n_maint` | MAINT | Post-grant maintenance-fee events. |
+| `n_other` | OTHER | Unmapped codes (~19% of events as of 2026-04-28). |
+| `n_assignments` | — | Pre-T₀ entries in `assignmentBag`. |
+| `n_distinct_assignees` | — | Distinct (normalized) assignee strings across pre-T₀ assignments. |
 | `n_parent_applications` | — | Length of `parentApplicationBag` (continuity chain depth). |
 
 ## 6. Raw categoricals (4)

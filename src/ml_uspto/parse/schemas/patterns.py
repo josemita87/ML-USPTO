@@ -1,19 +1,7 @@
 """Compiled regex patterns for `ml_uspto.parse`.
 
-All patterns are inline Python literals — internal regex extractors over
-filed-document text, kept next to the code that consumes them rather
-than in YAML. The non-regex petition-picker config (paper-number
-ceiling, exhibit-category strings) stays in `config/petition_picker.yaml`
-and is exposed via `ml_uspto.parse.schemas.constants`.
-
-Empirical reference values from IPR2022-01002 (Samsung+Apple v.
-Smart Mobile, '083 patent) — the canonical regression case for the
-petition-text patterns:
-    n_grounds                 = 1
-    n_grounds_103             = 1; n_grounds_102 = 0
-    has_sotera_stipulation    = True ("will cease asserting … any
-                                      invalidity contention")
-    mentions_fintiv_factors   = True (all 6 factor headers present)
+Regression anchor (IPR2022-01002): n_grounds=1, n_grounds_103=1,
+has_sotera_stipulation=True, mentions_fintiv_factors=True.
 """
 
 import re

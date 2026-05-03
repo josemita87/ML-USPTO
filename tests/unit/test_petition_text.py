@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from ml_uspto.features.schemas.constants import MIN_PETITION_TEXT_CHARS
 from ml_uspto.features.petition_text import (
@@ -157,12 +158,11 @@ def testselect_usable_rows_keeps_text_at_threshold():
     assert list(out["trial_number"]) == ["IPR2024-00001", "IPR2024-00002"]
 
 
-def testselect_usable_rows_no_op_when_column_missing():
-    """Missing `petition_text` column → no-op, mirrors the conditional Tier A path."""
+def testselect_usable_rows_raises_when_column_missing():
+    """Missing `petition_text` column is a pipeline bug — Tier A is mandatory."""
     frame = pd.DataFrame({"trial_number": ["IPR2024-00001"]})
-    out = select_usable_rows(frame)
-    assert len(out) == 1
-    assert list(out.columns) == ["trial_number"]
+    with pytest.raises(KeyError, match="petition_text"):
+        select_usable_rows(frame)
 
 
 def testselect_usable_rows_returns_copy():

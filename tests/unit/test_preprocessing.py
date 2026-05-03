@@ -31,7 +31,7 @@ def _frame(
             "owner_real_party": ["O"] * len(petitioners),
             "technology_center": technology_centers,
             "cpc_section": cpc_sections,
-            "n_events_pre_t0": n_events,
+            "n_events": n_events,
         }
     )
 
@@ -99,5 +99,5 @@ def test_preprocessor_median_imputer_uses_train_median():
     out = pre.transform(test)
     columns = pre.get_feature_names_out()
 
-    j = list(columns).index("n_events_pre_t0")
+    j = list(columns).index("n_events")
     assert out[0, j] == 30.0

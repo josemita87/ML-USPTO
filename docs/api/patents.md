@@ -75,14 +75,14 @@ Probe on 2026-04-27 against `applicationNumberText=14709428` (the patent in IPR2
 | `continuity_types` | `parentContinuityBag[*].claimParentageTypeCode` | static (CON / DIV / CIP / PRO) |
 | ⚠ `parent_status_now` | `parentContinuityBag[*].parentApplicationStatusCode` | **disallowed** — current status |
 | **Events (T₀-filtered, aggregated)** | | |
-| `n_events_pre_t0` | `len([e for e in eventDataBag if e.eventDate < T₀])` | static after filter |
+| `n_events` | `len([e for e in eventDataBag if e.eventDate < T₀])` | static after filter |
 | `prosecution_span_days` | `max - min` of pre-T₀ event dates | static after filter |
 | `days_grant_to_petition` | `petitionFilingDate - patentOwnerData.grantDate` | static, ≥ 0 |
 | ⚠ All `TRIAL*` events | `eventDataBag[*]` | **disallowed** — TRIALFWD is the label |
 | ⚠ All post-T₀ events | `eventDataBag[*]` with `eventDate ≥ T₀` | **disallowed** |
 | **Assignments (T₀-filtered)** | | |
-| `n_assignments_pre_t0` | count of `assignmentBag[*]` with `assignmentRecordedDate < T₀` | static after filter |
-| `n_distinct_assignees_pre_t0` | distinct `assigneeBag[*].assigneeNameText` across pre-T₀ rows | static after filter |
+| `n_assignments` | count of `assignmentBag[*]` with `assignmentRecordedDate < T₀` | static after filter |
+| `n_distinct_assignees` | distinct `assigneeBag[*].assigneeNameText` across pre-T₀ rows | static after filter |
 | `days_since_last_assignment` | `T₀ - max(assignmentRecordedDate)` over pre-T₀ rows | static after filter |
 | ⚠ Post-T₀ assignments | `assignmentBag[*]` with `assignmentRecordedDate ≥ T₀` | **disallowed** |
 | **Attorneys / status (use with care)** | | |

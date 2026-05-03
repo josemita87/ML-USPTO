@@ -145,15 +145,15 @@ The seed code→category lookup lives in `config/patents/event_codes.yaml`. Afte
 
 ### Per-family count features
 
-For each family except `TRIAL`, we emit `n_<family>_pre_t0` plus a sanity-check `total_events_pre_t0` sum.
+For each family except `TRIAL`, we emit `n_<family>` plus a sanity-check `n_events` sum.
 
-- **`n_pe_pre_t0`** — *Signal*: weak. Mostly clerical; anomalously many can hint at filing-quality issues.
-- **`n_ex_pre_t0`** — *Signal*: **strong**. Heaviest single signal in the family-count features. High counts mean many rejection rounds, many examiner exchanges → often weaker claims, more vulnerable in IPR. Low counts (first-action allowance) often mean stronger claims.
-- **`n_aa_pre_t0`** — *Signal*: moderate / interpretation-dependent. Often dominated by IDS filings — high counts indicate the applicant cited a lot of prior art, which can make IPR harder for the petitioner (much of their art was already considered) or can flag heavy amendment activity (weaker original claims).
-- **`n_ad_pre_t0`** — *Signal*: weak. Mostly opt-in for electronic notifications.
-- **`n_iss_pre_t0`** — *Signal*: weak. Almost every granted patent has 4–6 ISS events; low variance.
-- **`n_maint_pre_t0`** — *Signal*: moderate / strong. A patent that's already paid the 7.5-year fee is mature and commercially valuable enough that the owner has invested in keeping it alive. Petitioners disproportionately attack high-value patents.
-- **`n_other_pre_t0`** — *Signal*: weak in v1; diagnostic. After the smoke run we'll see which codes dominate and either promote them to a real family (e.g., abandonment events to a new `ABANDON` family) or leave them aggregated.
+- **`n_pe`** — *Signal*: weak. Mostly clerical; anomalously many can hint at filing-quality issues.
+- **`n_ex`** — *Signal*: **strong**. Heaviest single signal in the family-count features. High counts mean many rejection rounds, many examiner exchanges → often weaker claims, more vulnerable in IPR. Low counts (first-action allowance) often mean stronger claims.
+- **`n_aa`** — *Signal*: moderate / interpretation-dependent. Often dominated by IDS filings — high counts indicate the applicant cited a lot of prior art, which can make IPR harder for the petitioner (much of their art was already considered) or can flag heavy amendment activity (weaker original claims).
+- **`n_ad`** — *Signal*: weak. Mostly opt-in for electronic notifications.
+- **`n_iss`** — *Signal*: weak. Almost every granted patent has 4–6 ISS events; low variance.
+- **`n_maint`** — *Signal*: moderate / strong. A patent that's already paid the 7.5-year fee is mature and commercially valuable enough that the owner has invested in keeping it alive. Petitioners disproportionately attack high-value patents.
+- **`n_other`** — *Signal*: weak in v1; diagnostic. After the smoke run we'll see which codes dominate and either promote them to a real family (e.g., abandonment events to a new `ABANDON` family) or leave them aggregated.
 
 ### Other event-derived features
 
@@ -169,16 +169,16 @@ For each family except `TRIAL`, we emit `n_<family>_pre_t0` plus a sanity-check 
 
 ## 5. Assignments — ownership history
 
-### `n_assignments_pre_t0`
+### `n_assignments`
 **What**: Count of `assignmentBag` entries with `assignmentRecordedDate < T₀`. Includes original inventor→employer assignments, sales between companies, and security interests (loan collateral). **Signal**: moderate.
 
-### `n_distinct_assignees_pre_t0`
+### `n_distinct_assignees`
 **What**: Count of distinct `assigneeNameText` values across pre-T₀ rows. **Signal**: **strong**. High counts (3+) are textbook NPE / litigation-shop indicators — patents that have changed hands repeatedly before being asserted are disproportionately challenged. Caveat: "distinct" is a string match, so name-normalization matters (`Apple Inc.` vs `Apple Inc` vs `APPLE INC.` should collapse). Implement a normalizer or accept the noise in v1.
 
 ### `days_since_last_assignment`
 **What**: `T₀ − max(assignmentRecordedDate)` over pre-T₀ rows. **Signal**: weak/moderate. A recent ownership transfer right before the IPR (e.g., 30 days) often signals a litigation-prep transfer.
 
-⚠ **Missing-value semantics** (verified 2026-04-30 on the full 11.8K-app file-wrapper backfill): when `n_assignments_pre_t0 == 0`, `days_since_last_assignment` is `None` by construction in the per-row patent aggregator `features/patent_aggregator.py::_aggregate_patent_row`. This affects **1,132 / 10,834 patents (~10%)** that have a file wrapper. **Critical:** these are *not* dormant patents — their median `n_events_pre_t0` is 56 (max 188) with ~19 office actions on average. The missing assignment record is a **regime indicator**, not an activity proxy: it most often means an individual inventor or small entity that never recorded the inventor→applicant transfer with USPTO (recordation is optional). Treat it as informative — see §"Missingness semantics" below for the modeling treatment used in `features.transforms`.
+⚠ **Missing-value semantics** (verified 2026-04-30 on the full 11.8K-app file-wrapper backfill): when `n_assignments == 0`, `days_since_last_assignment` is `None` by construction in the per-row patent aggregator `features/patent_aggregator.py::_aggregate_patent_row`. This affects **1,132 / 10,834 patents (~10%)** that have a file wrapper. **Critical:** these are *not* dormant patents — their median `n_events` is 56 (max 188) with ~19 office actions on average. The missing assignment record is a **regime indicator**, not an activity proxy: it most often means an individual inventor or small entity that never recorded the inventor→applicant transfer with USPTO (recordation is optional). Treat it as informative — see §"Missingness semantics" below for the modeling treatment used in `features.transforms`.
 
 ### Post-T₀ assignments (banned)
 Assignments dated ≥ T₀ are dropped — patents losing IPRs are sometimes transferred shortly after, leaking the outcome.
@@ -203,16 +203,16 @@ Assignments dated ≥ T₀ are dropped — patents losing IPRs are sometimes tra
 
 Distinct "missing" regimes need to be preserved as features rather than collapsed by a blanket `fillna(0)`. The regime-A indicator and the per-patent NaN propagation are wired explicitly in `src/ml_uspto/features/transforms.py` (orchestrator) and `src/ml_uspto/features/patent_aggregator.py` (per-row aggregation).
 
-### Regime A — file wrapper not found (vacuous in v1)
-The 2026-04-30 backfill saw ~10% of trial-side application_numbers (1,213 / 11,844) come back `not_found` from `/applications/search`. Likely causes: pre-publication apps, foreign-only filings, re-issued application numbers, USPTO indexing lag. The 2026-05-03 v1 build shows 0/15,030 — every joined trial has a wrapper, so the regime is empty in this build. The companion indicator (`patent_features_missing`) was dropped because it was always 0 in v1; if a future refresh reintroduces wrapper-less trials, restore it.
+### Regime A — file wrapper not found (dropped upstream)
+The 2026-04-30 backfill saw ~10% of trial-side application_numbers (1,213 / 11,844) come back `not_found` from `/applications/search`. Likely causes: pre-publication apps, foreign-only filings, re-issued application numbers, USPTO indexing lag. The 2026-05-03 build saw 1/15,030 trials with no wrapper; the rate is small but non-zero across refreshes. The "wrapper not fetched" case is incompatible with the patent-side feature contract (filling counts with 0 would let the model learn "ingest failure" as "minimal patent activity"), so `features.patent_aggregator.select_with_file_wrapper` drops these rows upstream of feature construction — same disposal policy as `select_usable_rows` for petition-text failures.
 
 ### Regime B — wrapper present, but no recorded assignment
 ~10% of patents with a file wrapper (1,132 / 10,834) have an empty `assignmentBag` pre-T₀. As §5 notes, this is a **regime** (small-entity / individual-inventor / pro-se-style ownership) rather than a sign of dormancy — these patents have full prosecution histories. Captured by:
 
-- **`no_recorded_assignment`** — boolean, 1 iff `n_assignments_pre_t0 == 0`. Named for the *semantics*; numerically equivalent to `days_since_last_assignment_missing`.
+- **`no_recorded_assignment`** — boolean, 1 iff `n_assignments == 0`. Named for the *semantics*; numerically equivalent to `days_since_last_assignment_missing`.
 
 ### Regime C — count features that are legitimately zero
-For pre-T₀ event counts (`n_events_pre_t0`, `n_pe_pre_t0`, `n_ex_pre_t0`, …), a `None` arising from regime A is treated identically to "0 events" because that's what an empty event bag would have produced. Filled with 0 in `build_features`.
+For pre-T₀ event counts (`n_events`, `n_pe`, `n_ex`, …), the post-`select_with_file_wrapper` value is always a real count: 0 means "wrapper present, no events of this category", never "wrapper missing". The pre-2026-05-03 `fillna(0)` that collapsed both cases is gone.
 
 ### Regime D — nullable scalars where 0 ≠ None
 `prosecution_span_days`, `days_since_last_assignment`, and `days_grant_to_petition` carry semantic meaning when None (no events at all, no recorded assignment, no patent record respectively). Each gets:
@@ -234,9 +234,9 @@ Pre-modeling expectation, not empirical importance.
 
 | Strength | Features |
 |---|---|
-| **Strong** | `tech_center`, `n_distinct_assignees_pre_t0`, `n_parent_applications`, `days_grant_to_petition`, `n_ex_pre_t0`, `n_maint_pre_t0` |
-| **Moderate** | `entity_size`, `pta_total`, `pta_b_delay`, `prosecution_span_days`, `primary_section`, `n_aa_pre_t0`, `n_assignments_pre_t0`, `grant_date` (via derived) |
-| **Weak** | `n_inventors`, `n_attorneys_of_record`, `application_type`, `national_stage`, `first_inventor_to_file`, `n_pe_pre_t0`, `n_ad_pre_t0`, `n_iss_pre_t0`, `n_other_pre_t0` |
+| **Strong** | `tech_center`, `n_distinct_assignees`, `n_parent_applications`, `days_grant_to_petition`, `n_ex`, `n_maint` |
+| **Moderate** | `entity_size`, `pta_total`, `pta_b_delay`, `prosecution_span_days`, `primary_section`, `n_aa`, `n_assignments`, `grant_date` (via derived) |
+| **Weak** | `n_inventors`, `n_attorneys_of_record`, `application_type`, `national_stage`, `first_inventor_to_file`, `n_pe`, `n_ad`, `n_iss`, `n_other` |
 | **Banned** | `applicationStatusCode`, `applicationStatusDate`, `parent_status_now`, all `TRIAL*` events, all post-T₀ events, all post-T₀ assignments |
 
 ---

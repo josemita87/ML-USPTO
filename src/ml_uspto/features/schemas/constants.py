@@ -7,71 +7,46 @@ import yaml
 from ml_uspto import paths
 from ml_uspto.features.schemas.enums import EventCategory
 
-# Pre-T₀ count features — NaN ⇒ no file wrapper; safe to fill with 0
-# (0 events is what an empty bag would have produced upstream).
+# Pre-T₀ count features (post `select_with_file_wrapper`, so 0 means
+# "wrapper present, no events" — never "wrapper missing").
 PATENT_COUNT_FEATURES: tuple[str, ...] = (
-    "n_events_pre_t0",
-    "n_assignments_pre_t0",
-    "n_distinct_assignees_pre_t0",
+    "n_events",
+    "n_assignments",
+    "n_distinct_assignees",
     "n_parent_applications",
-    "n_pe_pre_t0",
-    "n_ex_pre_t0",
-    "n_aa_pre_t0",
-    "n_ad_pre_t0",
-    "n_iss_pre_t0",
-    "n_maint_pre_t0",
-    "n_other_pre_t0",
+    "n_pe",
+    "n_ex",
+    "n_aa",
+    "n_ad",
+    "n_iss",
+    "n_maint",
+    "n_other",
 )
 
-# Patent features whose NaN carries a distinct meaning from 0 — each
-# gets a paired `<name>_missing` indicator and median-filled value.
-# See docs/engineering/features/patent_file_wrapper_features.md §"Missingness semantics".
-#
-# `days_since_last_assignment` is intentionally absent: its missingness
-# is exactly `n_assignments_pre_t0 == 0`, surfaced as the
-# `no_recorded_assignment` regime indicator in `transforms.build_features`.
-# Adding `days_since_last_assignment_missing` here would emit a
-# perfectly collinear duplicate column.
+# Patent features whose NaN ≠ 0 — each gets a paired `<name>_missing`
+# indicator. `days_since_last_assignment` is absent because it would
+# duplicate `no_recorded_assignment` (collinear with `n_assignments == 0`).
 PATENT_NULLABLE_NUMERIC: tuple[str, ...] = (
     "prosecution_span_days",
     "days_grant_to_petition",
 )
 
-# Raw categoricals passed through `transforms.build_features` unencoded.
-# Encoding (one-hot / frequency) lives in the modeling-side preprocessor
-# so it is fit on training rows only — see
-# `ml_uspto.models.preprocessing.build_preprocessor`.
-#
-# OHE: closed taxonomies — TC has 17 stable USPTO codes, CPC section is
-# the 9 single-letter classes + nan. `handle_unknown="ignore"` keeps the
-# column set frozen at train fit time.
+# Closed taxonomies; OHE column set frozen at train-fit time.
 OHE_CATEGORICAL_COLUMNS: tuple[str, ...] = (
     "technology_center",
     "cpc_section",
 )
 
-# Frequency: open-vocabulary party identifiers. Counts must be learned
-# on train rows only — refit per CV fold via the Pipeline.
+# Open-vocab party identifiers; frequencies refit per CV fold.
 FREQUENCY_CATEGORICAL_COLUMNS: tuple[str, ...] = (
     "petitioner_real_party",
     "owner_real_party",
 )
 
-# Minimum length (in characters) for a `petition_text` blob to count
-# as usable input for the Tier A regex feature aggregator. Empirically
-# tuned against the 6,366-trial cohort (2026-05-02): unusable rows
-# (literal "BLANK" sentinels written by the ingest driver, all-whitespace
-# pdfplumber output, cover-page-only partial extractions) cluster at
-# ≤ 3,040 chars; the closest real petition observed sits at p01 = 59,117
-# chars, two orders of magnitude above the cut. The 5K threshold is
-# safely below any plausible real petition body and above every observed
-# extraction failure. Currently catches 20/6,366 trials = 0.31%, under
-# the project's <2% drop-policy threshold.
+# Empirical 2026-05-02 6,366-trial cohort: failures ≤3,040 chars,
+# real petitions ≥59K. 5K is the safe cut.
 MIN_PETITION_TEXT_CHARS: int = 5_000
 
-# Output-contract column set produced by
-# `petition_text.aggregate_petition_text_row`. Kept here so the feature
-# spec is revisable without touching the aggregation function.
 PETITION_TEXT_FEATURE_KEYS: tuple[str, ...] = (
     "n_grounds",
     "n_grounds_102",

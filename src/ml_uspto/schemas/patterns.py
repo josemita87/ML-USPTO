@@ -1,11 +1,4 @@
-"""Project-wide compiled regex patterns for FWD-outcome label resolution.
-
-Patterns are inline Python literals — they are internal regex extractors
-over filed-document text, not domain-revisable taxonomies, so per project
-convention they live next to their consumer rather than in YAML.
-The status / doctype taxonomies they pair with stay in
-`config/labels.yaml` (those *are* domain-revisable).
-"""
+"""Project-wide compiled regex patterns for FWD-outcome label resolution."""
 
 import re
 
