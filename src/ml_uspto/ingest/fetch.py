@@ -419,7 +419,7 @@ def fetch_decision_pdfs(
             continue
 
         text_bytes = text.encode("utf-8")
-        storage.save_blob(Stage.DECISION_TEXTS.value, doc_id, "txt", text_bytes)
+        storage.save_blob(Stage.DECISION_TEXTS, doc_id, "txt", text_bytes)
         yield DecisionPdfFetchResult(document_identifier=doc_id, bytes_written=len(text_bytes))
 
 
@@ -486,7 +486,7 @@ def fetch_petition_pdfs(
             continue
 
         text_bytes = text.encode("utf-8")
-        storage.save_blob(Stage.PETITION_TEXTS.value, trial, "txt", text_bytes)
+        storage.save_blob(Stage.PETITION_TEXTS, trial, "txt", text_bytes)
         yield PetitionPdfFetchResult(
             trial_number=trial,
             bytes_written=len(text_bytes),

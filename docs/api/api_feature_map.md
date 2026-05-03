@@ -84,7 +84,7 @@ Both are direct downloads via the authenticated session (`X-API-Key`). Reuse `cl
 
 > ⚠ **`documentOCRText` is a 500-char preview, not the full text.** Confirmed empirically 2026-04-24: every endpoint that returns `documentOCRText` (decisions search, documents endpoint, per-document detail endpoints) caps it at 500 characters — enough for the case caption and judge names, nothing substantive. For full decision text you must fetch the PDF via `documentData.fileDownloadURI`. This is a global API behavior, not a `fields`-projection artifact.
 
-> ⚠ **Naming collision:** the ODP catalog also exposes `/api/v1/petition/decisions/*` ("Petition Decision Search"). This is **not** PTAB data — it is the USPTO Office of Petitions' rulings on procedural prosecution matters (PPH requests, PTA disputes, abandonment revivals). Wrong corpus for this project. Telltale: `finalDecidingOfficeName: "OFFICE OF PETITIONS"` in the record. See `../scope/ptab_scope_and_terminology.md` §3.
+> ⚠ **Naming collision:** the ODP catalog also exposes `/api/v1/petition/decisions/*` ("Petition Decision Search"). This is **not** PTAB data — it is the USPTO Office of Petitions' rulings on procedural prosecution matters (PPH requests, PTA disputes, abandonment revivals). Wrong corpus for this project. Telltale: `finalDecidingOfficeName: "OFFICE OF PETITIONS"` in the record. See `../scope/glossary.md` §3.
 
 ### Decisions vs. documents — overlap, not duplication
 
@@ -115,7 +115,7 @@ The decisions endpoint is a **filtered subset of documents/search**, restricted 
 **Where each row of the model matrix comes from:**
 - *Trial inventory + label* → `POST /trials/proceedings/search` (live trial state — canonical list of all 18K IPRs).
 - *Petition row / PDF URI* → `POST /trials/documents/search` corpus-wide with `documentData.documentCategory IN ["PETITION", "Paper"]`, then run the petition picker per `trialNumber` (see `proceedings.md`). Read only `documentData.*` from the picked row (`fileDownloadURI`, `documentFilingDate`, etc.). The `trialMetaData` block on this row is **lagged**, not frozen at T₀, and may carry post-T₀ values — pull all `trialMetaData` features from `proceedings/search` instead.
-- *Petition-text features* → deferred v2. Current v1 stores the petition PDF URI but does not fetch or parse the petition PDF.
+- *Petition-text features (Tier A)* → fetch PDF via the picked row's `documentData.fileDownloadURI`, pdfplumber-extract under `Stage.PETITION_TEXTS`, regex-aggregate at feature-build time. The five shipped features are `n_grounds`, `n_grounds_102`, `n_grounds_103`, `has_sotera_stipulation`, `mentions_fintiv_factors`. Tier 1/2 (declaration counts, prior-art-reference taxonomy, embeddings) remain deferred v2.
 
 | # | Feature family | Specific feature | Endpoint | Source field / derivation | Status under prediction_scope |
 |---|---|---|---|---|---|
@@ -125,10 +125,10 @@ The decisions endpoint is a **filtered subset of documents/search**, restricted 
 | 1 | Petition-text | Sotera stipulation present | **petition PDF** | Petition §IV.4 phrase match ("will not pursue" / "stipulate" / "cease asserting") | **In scope (Tier A).** `has_sotera_stipulation` — see `parse/schemas/patterns.py::PETITION_SOTERA_PATTERNS`. |
 | 1 | Petition-text | Statute grounds asserted (102/103) | **petition PDF** | Petition §I.B grounds table — `§ 102` / `§ 103` regex variants | **In scope (Tier A).** `n_grounds_102`, `n_grounds_103`. §112 challenges are out of IPR scope. |
 | 1 | Petition-text | n_grounds | **petition PDF** | Petition §I.B grounds-table headers ("Ground N" / "Challenge #N" / "Grounds N and M") | **In scope (Tier A).** Distinct-index count. |
-| 1 | Petition-text | n_challenged_claims, n_prior_art_references | **petition PDF** | §I.B + exhibit list | **Deferred v2 (Tier 1).** Full feature catalog: `../features/admissible_documents_analysis.md` §2.6. |
+| 1 | Petition-text | n_challenged_claims, n_prior_art_references | **petition PDF** | §I.B + exhibit list | **Deferred v2 (Tier 1).** Full feature catalog: `../engineering/features/admissible_documents_analysis.md` §2.6. |
 | 2 | Decision-side structured | `statuteAndRuleBag` (e.g. `35 USC 325` for 325(d)) | documents/search filtered to `FINAL` (or decisions POST) | `decisionData.statuteAndRuleBag` | **Out of scope as feature** (§4 leakage). Available for label-set debugging only. |
 | 2 | Decision-side structured | `issueTypeBag` (102/103/112 actually addressed by judges) | documents/search filtered to `FINAL` (or decisions POST) | `decisionData.issueTypeBag` | **Out of scope as feature** (§4 leakage). Useful for evaluating extraction accuracy of feature 1 above. |
-| 2 | Decision PDF text | Fintiv factor ratings, dispositive factor | decision PDF | Full text → LLM/regex over per-factor headings | **Out of scope** (§4 leakage). Available for ground-truth Fintiv labels in evaluation only — see `../scope/ptab_scope_and_terminology.md` §5.4. |
+| 2 | Decision PDF text | Fintiv factor ratings, dispositive factor | decision PDF | Full text → LLM/regex over per-factor headings | **Out of scope** (§4 leakage). Available for ground-truth Fintiv labels in evaluation only — see `../scope/glossary.md` §5.4. |
 | 3 | Temporal / regime | Petition filing date (T₀ itself) | proceedings/search | `trialMetaData.petitionFilingDate`, `trialMetaData.accordedFilingDate` | **In scope.** |
 | 3 | Temporal / regime | `filing_year`, `filing_month` | proceedings/search (derived) | Calendar breakdown of `petitionFilingDate` | **In scope.** Year carries era control; month carries intra-year seasonality (§315(b) bunching, fiscal-year boundary, Director-memo timing). |
 | 3 | Temporal / regime | Institution decision date | proceedings/search (live) | `trialMetaData.institutionDecisionDate` | **Out of scope** (§4 leakage). Strictly label-side; do not pull from any source as a feature. |
@@ -137,7 +137,7 @@ The decisions endpoint is a **filtered subset of documents/search**, restricted 
 | 4 | Metadata | Counsel identity (petitioner / owner) | proceedings/search; richer petition detail deferred | `regularPetitionerData.counselName`, `patentOwnerData.counselName`; richer detail from petition §VI.C is v2 text work | **In scope from proceedings today.** Free text — needs normalization. |
 | 4 | Metadata | Real parties in interest | proceedings/search; richer petition detail deferred | `regularPetitionerData.realPartyInInterestName`, `patentOwnerData.realPartyInInterestName`; petition §VI.A is authoritative for joinder but full RPI-list extraction is Tier 1 v2 work | **In scope from proceedings today.** Frequency-encoded per CV fold. |
 | 5 | Petition-text structural | Petition word count + utilization | **petition PDF** | §42.24 certification footer | **Deferred v2.** |
-| 5 | Petition-text structural | Prior-art reference count + classification | **petition PDF** | Petition exhibit list | **Deferred v2.** Full taxonomy in `../features/admissible_documents_analysis.md` §6.1. |
+| 5 | Petition-text structural | Prior-art reference count + classification | **petition PDF** | Petition exhibit list | **Deferred v2.** Full taxonomy in `../engineering/features/admissible_documents_analysis.md` §6.1. |
 
 ---
 
@@ -145,7 +145,7 @@ The decisions endpoint is a **filtered subset of documents/search**, restricted 
 
 Features that previously looked like they needed external sources, but are admissible through petition-text extraction (the petition is at T₀):
 
-- **Sotera stipulation** — extracted in v1 as the Tier A `has_sotera_stipulation` flag from petition §IV.4 phrase matches ("will not pursue" / "stipulate" / "cease asserting" / etc.). Earlier drafts flagged this as needing district-court data; it is usually in the petition because the petitioner has every incentive to feature it prominently. Pattern catalog: `parse/schemas/patterns.py::PETITION_SOTERA_PATTERNS`. See `../scope/ptab_scope_and_terminology.md` §5.
+- **Sotera stipulation** — extracted in v1 as the Tier A `has_sotera_stipulation` flag from petition §IV.4 phrase matches ("will not pursue" / "stipulate" / "cease asserting" / etc.). Earlier drafts flagged this as needing district-court data; it is usually in the petition because the petitioner has every incentive to feature it prominently. Pattern catalog: `parse/schemas/patterns.py::PETITION_SOTERA_PATTERNS`. See `../scope/glossary.md` §5.
 - **Parallel-litigation status / trial date proximity** — partially captured in v1 as `mentions_fintiv_factors` (binary). Per-factor narrative ratings (jury date, schedule) still require either Tier 1 v2 structural extraction or PACER data. See `../scope/prediction_scope.md` §8.3.
 
 Genuinely missing from a petition-only pipeline:

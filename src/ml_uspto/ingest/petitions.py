@@ -1,4 +1,4 @@
-"""Petition-PDF cache-gap detection + cached-blob → text-frame assembly."""
+"""Petition-PDF cache-gap detection."""
 
 from __future__ import annotations
 
@@ -40,18 +40,15 @@ def enumerate_missing_petition_pdfs(
     if petitions.empty:
         return pd.DataFrame({c: [] for c in PETITION_GAP_CANDIDATE_COLUMNS})
 
-    candidates = petitions[list(PETITION_GAP_CANDIDATE_COLUMNS)].copy()
-    candidates["trial_number"] = candidates["trial_number"].astype(str)
-
-    n_total = len(candidates)
-    has_uri = candidates["petition_pdf_uri"].fillna("").astype(str).str.strip().ne("")
-    candidates = candidates.loc[has_uri].copy()
+    n_total = len(petitions)
+    candidates = petitions[list(PETITION_GAP_CANDIDATE_COLUMNS)].dropna(
+        subset=list(PETITION_GAP_CANDIDATE_COLUMNS)
+    )
+    candidates = candidates.loc[candidates["petition_pdf_uri"].str.strip().ne("")]
     n_with_uri = len(candidates)
 
-    cached_keys = set(storage.iter_blob_keys(Stage.PETITION_TEXTS.value, "txt"))
-    candidates = candidates.loc[
-        ~candidates["trial_number"].isin(cached_keys)
-    ].copy()
+    cached_keys = set(storage.iter_blob_keys(Stage.PETITION_TEXTS, "txt"))
+    candidates = candidates.loc[~candidates["trial_number"].isin(cached_keys)]
     n_final = len(candidates)
 
     logger.info(
@@ -61,28 +58,4 @@ def enumerate_missing_petition_pdfs(
     return candidates.reset_index(drop=True)
 
 
-def build_petition_texts_frame(storage: Storage) -> pd.DataFrame:
-    """Walk every cached petition-text blob → frame for `Frame.PETITION_TEXTS`.
-
-    Idempotent over the blob store: no HTTP, no PDF parsing. Output
-    schema is `(trial_number, petition_text)` — the joiner left-joins
-    on `trial_number`, the features stage runs Tier A regexes over
-    `petition_text`.
-    """
-    rows: list[dict[str, str]] = []
-    for trial in storage.iter_blob_keys(Stage.PETITION_TEXTS.value, "txt"):
-        payload = storage.load_blob(Stage.PETITION_TEXTS.value, trial, "txt")
-        if payload is None:
-            # Race window between iter_blob_keys and load_blob — skip.
-            logger.warning("Petition text blob disappeared mid-iteration: %s", trial)
-            continue
-        rows.append(
-            {
-                "trial_number": trial,
-                "petition_text": payload.decode("utf-8", errors="replace"),
-            }
-        )
-    return pd.DataFrame(rows, columns=["trial_number", "petition_text"])
-
-
-__all__ = ["build_petition_texts_frame", "enumerate_missing_petition_pdfs"]
+__all__ = ["enumerate_missing_petition_pdfs"]

@@ -7,11 +7,15 @@ from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+import pandas as pd
+
+from ml_uspto.ingest.schemas.enums import Stage
 from ml_uspto.parse.schemas.constants import (
     EXHIBIT_CATEGORIES,
     PAPER_NUMBER_CEILING,
 )
 from ml_uspto.parse.schemas.patterns import BLACKLIST, PETITION_TITLE
+from ml_uspto.protocols.storage import Storage
 from ml_uspto.schemas.models import Petition
 
 logger = logging.getLogger(__name__)
@@ -132,4 +136,28 @@ def assemble_petitions(
     return petitions
 
 
-__all__ = ["pick_petition", "assemble_petitions"]
+def build_petition_texts_frame(storage: Storage) -> pd.DataFrame:
+    """Walk every cached petition-text blob → frame for `Frame.PETITION_TEXTS`.
+
+    Idempotent over the blob store: no HTTP, no PDF parsing. Output
+    schema is `(trial_number, petition_text)` — the joiner left-joins
+    on `trial_number`, the features stage runs Tier A regexes over
+    `petition_text`.
+    """
+    rows: list[dict[str, str]] = []
+    for trial in storage.iter_blob_keys(Stage.PETITION_TEXTS, "txt"):
+        payload = storage.load_blob(Stage.PETITION_TEXTS, trial, "txt")
+        if payload is None:
+            # Race window between iter_blob_keys and load_blob — skip.
+            logger.warning("Petition text blob disappeared mid-iteration: %s", trial)
+            continue
+        rows.append(
+            {
+                "trial_number": trial,
+                "petition_text": payload.decode("utf-8", errors="replace"),
+            }
+        )
+    return pd.DataFrame(rows, columns=["trial_number", "petition_text"])
+
+
+__all__ = ["assemble_petitions", "build_petition_texts_frame", "pick_petition"]

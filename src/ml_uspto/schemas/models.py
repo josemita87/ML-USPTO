@@ -137,7 +137,6 @@ class FeatureRow(BaseModel):
     prosecution_span_days_missing: int | None = None
     days_since_last_assignment: int | None = None
     no_recorded_assignment: int | None = None
-    patent_features_missing: int | None = None
 
     # Raw categoricals — encoded downstream by the modeling preprocessor.
     technology_center: str | None = None
@@ -183,7 +182,7 @@ class ModelMetrics(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Ingestion pipeline seams (see docs/plans/2026-04-29-ingestion-pipeline.md §6)
+# Ingestion pipeline seams
 # ---------------------------------------------------------------------------
 
 
@@ -198,7 +197,7 @@ class Petition(BaseModel):
     via `Frame.PETITION_TEXTS` and are computed in
     `features.transforms.build_features` (see
     `docs/scope/prediction_scope.md` §5 and
-    `docs/features/admissible_documents_analysis.md`).
+    `docs/engineering/features/admissible_documents_analysis.md`).
 
     Built from `documentData.*` paths only. The `trialMetaData` block on a
     document row is the live trial header lagged by the documents-endpoint

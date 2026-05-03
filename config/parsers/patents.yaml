@@ -49,6 +49,11 @@ decisions:
     # cached-text fallback label resolver for FWDs whose document_title
     # doesn't encode the granular outcome.
     document_identifier: documentData.documentIdentifier
+    # Source URI for the opinion PDF; consumed by the FWD-PDF gap
+    # detector (`ingest.decisions.enumerate_missing_fwd_pdfs`) to hand
+    # to the fetch driver. Without this mapping the gap detector would
+    # have to walk the raw `Stage.DECISIONS` cache to recover URIs.
+    file_download_uri: documentData.fileDownloadURI
 
 # Patents (/applications) flatten lives in `parse.patents.to_flat_record`,
 # not here: it produces parallel-array columns (event_codes/event_dates,

@@ -174,7 +174,7 @@ def pick_petition(rows):
 ```
 
 3. **Reconcile in the joiner.** The joiner inner-joins labeled trials to the picked petition roster by `trialNumber`. Missing petition rows are excluded from the training frame; `JoinReport.n_joined` is the audit count.
-4. **PDF download** — deferred v2 for petition-text features. Current v1 stores `documentData.fileDownloadURI` but does not fetch petition PDFs.
+4. **PDF download — Tier A (shipped).** `drivers/run_ingest_petition_text.py` chains the gap detector → `fetch_petition_pdfs` → pdfplumber extraction → text blob cache under `Stage.PETITION_TEXTS` → `Frame.PETITION_TEXTS`. The features stage runs Tier A regexes (`n_grounds`, `n_grounds_102`, `n_grounds_103`, `has_sotera_stipulation`, `mentions_fintiv_factors`) over `petition_text`. Tier 1/2 (declaration counts, prior-art-reference taxonomy, embeddings) remain deferred v2.
 
 ### Ambiguity classes the picker handles
 
@@ -193,7 +193,7 @@ Three failure modes were observed in earlier picker versions and are now defende
 
 The picker is regression-tested against these fixtures in `tests/unit/test_petition_picker.py`; the implementation lives in `src/ml_uspto/parse/petitions.py`.
 
-## Petition PDF format — native text, no OCR required for v2
+## Petition PDF format — native text, no OCR required
 
 Stratified probe of 50 petitions across 2012, 2014, 2017, 2020, 2024 (10/year), 2026-04-27. For each picked petition: download via `documentData.fileDownloadURI`, extract text with `pdfplumber`, compute chars-per-page over the first 30 pages.
 
@@ -207,7 +207,7 @@ Stratified probe of 50 petitions across 2012, 2014, 2017, 2020, 2024 (10/year), 
 
 **46 / 46 successful downloads were native-text PDFs.** None fell below 800 chars/page; the threshold for "image PDF" is 100 chars/page (orders of magnitude separation, no borderline cases). Even the oldest 2012 cohort runs ~1,400 chars/page — USPTO has mandated e-filing of petitions since IPR's launch in 2012, and the empirical record matches.
 
-**Implication.** The deferred petition-text pipeline can use a pure-Python parser (`pdfplumber` for layout-aware extraction, `pypdf` if speed becomes the constraint) **without an OCR fallback**. Quarantine any future image-PDF outliers rather than scaling up an OCR pipeline for a population we haven't observed. Re-run this probe on a larger stratified sample only if quarantine rates rise materially.
+**Implication.** The shipped petition-text pipeline uses pdfplumber for layout-aware extraction with no OCR fallback. Quarantine any future image-PDF outliers rather than scaling up an OCR pipeline for a population we haven't observed. Re-run this probe on a larger stratified sample only if quarantine rates rise materially.
 
 **Ancillary finding — auth required for PDF URLs.** The `fileDownloadURI` URL shape (`https://api.uspto.gov/api/v1/patent/ptab-files/IPR/...`) looks like a static asset path but goes through the same `X-API-Key` gate as the search APIs. Bare `requests.get(uri)` returns 403 Forbidden for every petition; the authenticated `client.session.get(uri)` returns 200. PDF download code must reuse the authenticated session — see `rate_limits.md` §3.
 
@@ -217,7 +217,7 @@ Use both endpoints, with clear role separation:
 
 1. **Trial inventory, features, and label** — `proceedings/search` paginated. Canonical source for all `trialMetaData` and party-block fields. One row per trial with the freshest `trialStatusCategory`, `terminationDate`, etc.
 2. **Petition row + T₀ cross-check** — corpus-wide `POST /trials/documents/search` filtered to `documentData.documentCategory IN ["PETITION", "Paper"]`, then run `pick_petition()` per trial. Read **only** `documentData.*` from the picked row. Ignore `trialMetaData` on this row — it is lagged and can carry post-T₀ values (see "What we observed").
-3. **Petition PDF download** — deferred v2. The current pipeline stores the URI only.
+3. **Petition PDF download (Tier A, shipped)** — `drivers/run_ingest_petition_text.py` fetches each picked petition's PDF, extracts text via pdfplumber, persists text-only blobs under `Stage.PETITION_TEXTS`, and assembles `Frame.PETITION_TEXTS`. The features stage runs the five Tier A regexes (`n_grounds`, `n_grounds_102`, `n_grounds_103`, `has_sotera_stipulation`, `mentions_fintiv_factors`) over the resulting text column. Tier 1/2 work (declaration counts, prior-art-reference taxonomy, embeddings) is deferred v2.
 
 The corpus-wide PETITION-only query (~6K rows) is *not* a viable shortcut — it misses ~12K legacy trials. The correct corpus-scale path is the combined `PETITION` / `Paper` scan plus the title picker.
 

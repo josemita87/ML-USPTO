@@ -1,6 +1,6 @@
 # Prediction Task Scope
 
-> Statute and rule citations in this doc (`§ 102`, `§ 103`, `§ 112`, `§ 325(d)`, `§ 315(b)`, etc.) and patent-law terms (Fintiv, Sotera, POSITA, RPI) are defined in plain English in `ptab_scope_and_terminology.md` §4.
+> Statute and rule citations in this doc (`§ 102`, `§ 103`, `§ 112`, `§ 325(d)`, `§ 315(b)`, etc.) and patent-law terms (Fintiv, Sotera, POSITA, RPI) are defined in plain English in `glossary.md` §4.
 
 This document fixes the prediction task, the eligibility rule for features, and the system-level consequences. It is the single source of truth on **what we are predicting** and **what we are allowed to use to predict it**. Other docs (endpoint maps, rate limits, feature catalogs) remain authoritative on *how* the data is fetched, but this doc takes precedence on *what counts as a valid feature for this project*.
 
@@ -84,7 +84,7 @@ The four cover-page phrasings split into three outcome classes — petitioner sw
 - **Threshold stability.** "Some" is operationally fuzzy without per-claim adjudication: which claims, what fraction, were they independent or dependent, were they the asserted ones in litigation? The Board's cover-page language doesn't say. Collapsing "Some" → 0 sidesteps that and gives a label that's reproducible from the cover page alone.
 - **Class balance.** Partial outcomes are roughly 5–10% of FWDs (`docs/api/api_feature_map.md` §3 / §3.1 manifest). A 3-class target (all / some / none) creates a tiny middle class with high variance — usually worse models than the binary cut.
 
-**What this choice costs.** Patent-owner-side prediction. From a patent owner's perspective, even one cancelled claim can be a real loss. A model trained on this label is implicitly answering the *petitioner*'s question. The patent-owner question — *"will I walk away unscathed?"* — is the opposite binary cut (1 iff `No Challenged Claims Unpatentable`), and the same regex set distinguishes those three classes already. **Schema-additive escape hatch:** if a future use case wants the patent-owner cut or the 3-class target, expose `outcome ∈ {all_unpatentable, mixed, none_unpatentable}` alongside the binary `cancelled` — `parse.fwd_outcome.extract_outcome` would need to return the per-pattern label rather than collapse to 0/1. The cover-page regex already discriminates the three classes; only the label-collapse step throws information away.
+**What this choice costs.** Patent-owner-side prediction. From a patent owner's perspective, even one cancelled claim can be a real loss. A model trained on this label is implicitly answering the *petitioner*'s question. The patent-owner question — *"will I walk away unscathed?"* — is the opposite binary cut (1 iff `No Challenged Claims Unpatentable`), and the same regex set distinguishes those three classes already. **Schema-additive escape hatch:** if a future use case wants the patent-owner cut or the 3-class target, expose `outcome ∈ {all_unpatentable, mixed, none_unpatentable}` alongside the binary `cancelled` — `parse.labels.extract_outcome` would need to return the per-pattern label rather than collapse to 0/1. The cover-page regex already discriminates the three classes; only the label-collapse step throws information away.
 
 So `Some` → 0 is **defensible and currently canonical**, but worth being explicit that it's a scope decision tied to the question this project is built to answer, not a fact about the data.
 
@@ -149,6 +149,8 @@ flowchart LR
 - **Joinder petitions** — they reference an existing trial whose record contains post-T₀ data; risk of cross-trial leakage. Train on stand-alone petitions only; identify joinder via petition-name patterns and procedural orders.
 - **Repeat petitions against the same patent.** Keep the earliest petition per patent; later petitions' features are partially conditioned on the first petition's trajectory.
 
+The "admissible at T₀" claims for the patent-owner RPI, the continuity bag, the assignment chain, and the CPC bag rest on field-freshness assumptions that are not documented by USPTO. Empirical verifications of all four are logged in §8.6.
+
 ## 5. System implications
 
 ### 5.1 The pipeline shrinks
@@ -170,7 +172,7 @@ downloaded and pdfplumber-extracted at fetch time; only the extracted
 text persists, under `Stage.PETITION_TEXTS / <trial_number>.txt` (the
 binary PDF is never written to disk, mirroring the FWD-text path).
 Text is then aggregated by row-local regex passes in
-`features.transforms._aggregate_petition_text_row` into five Tier A
+`features.petition_text.aggregate_petition_text_row` into five Tier A
 columns: `n_grounds`, `n_grounds_102`, `n_grounds_103`,
 `has_sotera_stipulation`, `mentions_fintiv_factors`. Pattern catalog
 in `parse/schemas/patterns.py`; ground truth + audit cohort in
@@ -179,8 +181,8 @@ in `parse/schemas/patterns.py`; ground truth + audit cohort in
 Trials whose petition text is unusable for regex extraction
 (BLANK ingest sentinel, scanned-image PDF, all-whitespace pdfplumber
 output, cover-page-only partial) are dropped from the feature matrix
-by `features.transforms._select_usable_rows` — see
-`../features/features_csv_dictionary.md` §7 for the threshold and
+by `features.petition_text.select_usable_rows` — see
+`../engineering/features/features_csv_dictionary.md` §7 for the threshold and
 its empirical justification.
 
 The decision-side PDF path is label-only: unresolved original-FWD
@@ -200,8 +202,10 @@ Retrieval path used in v1:
 The structured-feature backbone comes from the live `/applications/search`
 file-wrapper API, batched by unique `applicationNumberText` and cached under
 `Stage.PATENTS`. The parser keeps scalar metadata and parallel arrays for
-events / assignments / CPC codes; `features.transforms.build_features` applies
-the T₀ filter and aggregation after the trial join.
+events / assignments / CPC codes; `features.transforms.build_features`
+orchestrates the row-local pipeline, with patent-side aggregation in
+`features.patent_aggregator.aggregate_patents` and Tier A petition-text
+extraction in `features.petition_text.aggregate_petition_text_row`.
 
 Bulk products in `../api/bulk_datasets.md` remain useful future scaling inputs,
 but they are not the current ingestion path.
@@ -247,22 +251,31 @@ Neither endpoint enforces leakage discipline for us — the API has no T₀-froz
 
 ## 6. Document map (what each doc owns)
 
-| Asset | Role under this scope |
+The four `docs/` buckets and where this scope doc fits within them:
+
+| Bucket | Doc | Role |
+|---|---|---|
+| `scope/` | `prediction_scope.md` (this doc) | **Authoritative on what we predict and what we may use.** §4 leakage rule + §8 modeling assumptions are binding. |
+| `scope/` | `glossary.md` | Patent-law glossary — statutes, rules, IPR/PGR/CBM/DER, proceeding/decision/appeal, Fintiv/Sotera/General Plastic, POPR/POR/FWD. |
+| `scope/` | `context.md` | Domain *why* — political-regime cycles driving institution rates, document-structure regularities, Sotera as binding-commitment, competitive landscape. |
+| `scope/` | `lifecycle_case_study.md` | Worked example: full IPR2022-01002 timeline (1,430 days, 145 papers); Phases 3–8 explicitly out of scope as feature sources. |
+| `api/` | `api_feature_map.md` | Endpoint surface — which endpoint returns which field; defers to this doc on inclusion. |
+| `api/` | `proceedings.md`, `patents.md`, `rate_limits.md`, `bulk_datasets.md` | External USPTO ODP reference. |
+| `engineering/` | `pipeline.md` | Ingest DAG, cache flow, label resolution. |
+| `engineering/` | `storage.md`, `parsers.md`, `frames.md`, `configuration.md` | How the project is built (storage backends, flatten engine, parquet contracts, settings). |
+| `engineering/features/` | `admissible_documents_analysis.md`, `features_csv_dictionary.md`, `patent_file_wrapper_features.md` | Feature catalogs. |
+| `deployment/` | `foundation_stack.md` | Production AWS infra. |
+
+Code-level ownership of the scope's invariants:
+
+| Code path | Role under this scope |
 |---|---|
-| `prediction_scope.md` (this doc) | **Authoritative on what we predict and what we may use.** §4 leakage rule + §8 modeling assumptions are binding. |
-| `../api/api_feature_map.md` | Endpoint surface — *which endpoint returns which field*. Updated §2 marks each field's status under this scope. Defers to this doc on inclusion. |
-| `ptab_scope_and_terminology.md` | Patent-law glossary (statutes, rules, Fintiv lifecycle). §4 statute glossary + §5 Fintiv lifecycle are the canonical references for those concepts. |
-| `../api/bulk_datasets.md` | Bulk-product catalog for future scaling; not the current v1 feature source. |
-| `../features/patent_file_wrapper_features.md` | Patent-side feature catalog (joins on `patentNumber`). |
-| `../api/rate_limits.md` | Quota constraints. Cost model defers to §5.4 here. |
-| `../features/admissible_documents_analysis.md` | Per-document analysis for `IPR2022-01002`; defines the 54-feature petition-derived catalog and tier demotions. |
-| `domain_notes.md` | Legal-domain *why* behind features. Reconciled with binary-classification scope and petition-only feature policy. |
-| `../examples/ipr_lifecycle_case_study.md` | Full IPR lifecycle (1,430 days, 145 papers). §9 explicitly lists Phases 3–8 as out-of-scope as feature sources. Orientation only. |
-| `../api/proceedings.md` | Live-vs-frozen distinction between the proceedings and documents endpoints (empirical, 2026-04-26). Proceedings = label / static metadata source; documents/search petition rows contribute only `documentData.*`. |
-| `src/ml_uspto/features/transforms.py` | Current feature builder. T₀ filter on patent arrays + Tier A petition-text aggregation; `_select_usable_rows` drops trials below the petition-text length threshold. |
+| `src/ml_uspto/features/transforms.py` | Feature-build orchestrator (calls `aggregate_patents` and `aggregate_petition_text_row`; runs `select_usable_rows` first). |
+| `src/ml_uspto/features/patent_aggregator.py` | Patent-side row-local T₀ aggregation off `Frame.PATENTS` parallel-array columns. |
+| `src/ml_uspto/features/petition_text.py` | Tier A regex aggregator + `select_usable_rows` length filter that drops trials below the petition-text length threshold. |
 | `src/ml_uspto/parse/schemas/patterns.py` | Tier A petition-text regex catalog (grounds, statutes, Sotera, Fintiv) and petition-picker title/blacklist regexes. |
 | `tests/integration/test_petition_text_cached.py` | 124-trial ground-truth audit cohort for the Tier A regexes. |
-| `src/ml_uspto/clients/uspto.py` | API client. Proceedings POST + documents POST + decisions POST + application search + authenticated PDF download are all part of the active surface — distinct roles per `../api/proceedings.md`. |
+| `src/ml_uspto/clients/uspto.py` | API client (proceedings/documents/decisions POST + application search + authenticated PDF download). |
 
 ## 7. Open questions and sensitivity tests
 
@@ -298,7 +311,7 @@ text across ~6,366 trials processed at the time of writing
 (p50 = 105K chars per petition; max = 690K). FWD label-fallback text
 adds a few MB.
 
-See `../features/admissible_documents_analysis.md` for the per-document analysis that informed each demotion.
+See `../engineering/features/admissible_documents_analysis.md` for the per-document analysis that informed each demotion.
 
 ### 8.2 Fintiv extraction: advocacy, not adjudication
 
@@ -310,7 +323,7 @@ What v1 extracts is the **petitioner's preemptive framing in petition §IV** —
 - The Sotera stipulation is the one piece of §IV that's a binding commitment rather than rhetoric, and is therefore unusually high-signal.
 - Ground-truth Fintiv labels (the PTAB's actual factor-by-factor ruling) live in the Institution Decision and are accessible only for evaluation/sanity-check, never as features.
 
-See `ptab_scope_and_terminology.md` §5 for the full Fintiv lifecycle and `../features/features_csv_dictionary.md` §7 for the Tier A pattern catalog.
+See `glossary.md` §5 for the full Fintiv lifecycle and `../engineering/features/features_csv_dictionary.md` §7 for the Tier A pattern catalog.
 
 ### 8.3 Lower-precision parallel-lawsuit data in v1
 
@@ -324,11 +337,66 @@ For the Fintiv signals that actually matter (jury date, FWD-vs-trial timing, Sot
 
 ### 8.4 Single-jurisdiction PTAB scope
 
-Trial-type filter is `IPR` only (CBM sunset in 2020; PGR/INT/DER excluded for low volume or structural mismatch). See `ptab_scope_and_terminology.md` §2.
+Trial-type filter is `IPR` only (CBM sunset in 2020; PGR/INT/DER excluded for low volume or structural mismatch). See `glossary.md` §2.
 
 ### 8.5 Time-aware evaluation is mandatory
 
 Cross-validation must be **time-based** (train on petitions ≤ cutoff, test on later petitions), not random k-fold. Random splits would let the model see future petitions' contemporary conditions during training. Reported metrics should always include the train/test temporal cutoff.
+
+### 8.6 T₀-leakage probes — admissible-source freshness verifications
+
+The §4 admissibility rules treat several fields as "frozen at T₀": the
+proceedings-side patent owner / RPI, the patent's continuity chain, its
+assignment history, and its CPC classification. USPTO's Open Data
+Portal does not document field-mutability semantics, so these claims
+were assumptions until the four probes below ran on 2026-05-03. Each
+probe re-checks a `<stored>` snapshot from the corpus parquets against
+a `<live>` per-record GET; divergence between the two would indicate
+the field is refreshed at request time and therefore leaks post-T₀
+information into ostensibly admissible features.
+
+| Field | Endpoint | Probe sample | Verdict |
+|---|---|---|---|
+| `patentOwnerData.realPartyInInterestName` | `GET /trials/proceedings/{trial}` | 6 IPRs filed pre-2021 with post-T₀ patent reassignment ≥ 180 days after T₀ (incl. one trial whose patent was reassigned 2024-08-06, ~4 years post-T₀) | **Frozen at petition declaration.** Live RPI matched the stored value byte-for-byte across all 6 trials; none matched the post-T₀ assignee. The field is what the petitioner declared at filing time, not a live join against `assignmentBag`. |
+| `parentContinuityBag` | `GET /applications/{appNum}` | 7 patents from 2016–2017-era IPRs | Identical parent-application sets between stored and live for all 7. Reading consistent with the API treating the parent chain as a backwards-pointing snapshot. |
+| `assignmentBag` (received-date list, assignee names) | `GET /applications/{appNum}` | 5 patents with ≥ 4 assignment entries each | Byte-identical received-date sequences between stored and live across all 5. The only correction-shaped field exposed in entries is `imageAvailableStatusCode` (PDF availability, not content state). |
+| `applicationMetaData.cpcClassificationBag` | `GET /applications/{appNum}` | 7 patents from 2016–2017-era IPRs | Byte-identical CPC sets between stored and live across all 7. The `cpc_section` feature uses only the first letter of the first code, so even within-section reclassification (e.g., `G06F 3/04842` → `G06F 3/04845`) would not move the value. |
+
+**Why this is documented and not just trusted.** Three of the four
+fields (continuity, assignments, CPC) live on `/applications/{appNum}`,
+which the API otherwise documents as returning current state. There
+was a plausible pathway — USPTO refreshing the response at request
+time against a moving database — that would have made the patent-side
+features silently leaky for any trial where the underlying patent
+later changed. The probes show the response is stable in practice
+across multi-year intervals, but this is empirical, not contractual.
+
+**Maintenance.** Re-run the four probes when (a) the ODP API base URL
+or version is bumped, (b) the ingest path migrates to a different
+endpoint family (e.g., bulk dataset pulls), or (c) a domain expert
+flags a specific trial where they suspect post-T₀ contamination. Treat
+any divergence as a critical bug — the corresponding feature should be
+quarantined until the probe results can be reconciled.
+
+**Probe recipe** (representative; full source in conversation history):
+
+```python
+from ml_uspto.clients.uspto import USPTOClient
+c = USPTOClient()
+
+# RPI freshness on a known post-T₀ reassignment
+r = c.get_proceeding("IPR2021-00328")
+live_rpi = r["patentTrialProceedingDataBag"][0]["patentOwnerData"]["realPartyInInterestName"]
+# Compare against stored owner_real_party in joined_trials.parquet.
+
+# CPC + continuity + assignmentBag on the patent endpoint
+app = "11629870"
+data = c.session.get(f"{c.base_url}/applications/{app}").json()["patentFileWrapperDataBag"][0]
+live_cpc = [e["cpcClassificationText"] for e in data["applicationMetaData"]["cpcClassificationBag"]]
+live_parents = [e["parentApplicationNumberText"] for e in data["parentContinuityBag"]]
+live_assign_dates = [e["assignmentReceivedDate"] for e in data["assignmentBag"]]
+# Compare each against the corresponding column in patents.parquet.
+```
 
 ---
 
@@ -337,9 +405,9 @@ Cross-validation must be **time-based** (train on petitions ≤ cutoff, test on 
 - `README.md §6` — the earlier multi-priority feature plan; the T₀ rule in §4 supersedes the per-priority enumeration for any decision about feature inclusion.
 - `../api/api_feature_map.md` — endpoint mapping (still authoritative for "which endpoint returns what").
 - `../api/bulk_datasets.md` — bulk catalogue and ingestion ordering.
-- `../features/patent_file_wrapper_features.md` — primary feature catalogue under this scope.
-- `ptab_scope_and_terminology.md` — terminology and statute glossary; §5 covers Fintiv.
+- `../engineering/features/patent_file_wrapper_features.md` — primary feature catalogue under this scope.
+- `glossary.md` — terminology and statute glossary; §5 covers Fintiv.
 - `../api/rate_limits.md` — quota constraints; cost table in §5.4 here is the operational version for this scope.
-- `../features/admissible_documents_analysis.md` — per-document feature plan and tier demotions.
-- `../examples/ipr_lifecycle_case_study.md` — the full lifecycle this scope deliberately ignores past T₀.
-- `domain_notes.md` — legal-domain context behind the petition-text feature ideas.
+- `../engineering/features/admissible_documents_analysis.md` — per-document feature plan and tier demotions.
+- `lifecycle_case_study.md` — the full lifecycle this scope deliberately ignores past T₀.
+- `context.md` — political-regime cycles, document-structure regularities, and competitive landscape.

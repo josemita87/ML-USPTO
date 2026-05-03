@@ -78,8 +78,6 @@ Probe on 2026-04-27 against `applicationNumberText=14709428` (the patent in IPR2
 | `n_events_pre_t0` | `len([e for e in eventDataBag if e.eventDate < T₀])` | static after filter |
 | `prosecution_span_days` | `max - min` of pre-T₀ event dates | static after filter |
 | `days_grant_to_petition` | `petitionFilingDate - patentOwnerData.grantDate` | static, ≥ 0 |
-| `n_office_actions` | count of pre-T₀ events with code in `{CTNF, CTFR, ...}` | static after filter |
-| `n_ids_filings` | count of pre-T₀ events with code in `{IDS, WIDS}` | static after filter |
 | ⚠ All `TRIAL*` events | `eventDataBag[*]` | **disallowed** — TRIALFWD is the label |
 | ⚠ All post-T₀ events | `eventDataBag[*]` with `eventDate ≥ T₀` | **disallowed** |
 | **Assignments (T₀-filtered)** | | |

@@ -6,10 +6,10 @@ import numpy as np
 import pandas as pd
 
 from ml_uspto.features.schemas.constants import MIN_PETITION_TEXT_CHARS
-from ml_uspto.features.transforms import (
-    _aggregate_petition_text_row as extract_petition_text_features,
+from ml_uspto.features.petition_text import (
+    aggregate_petition_text_row as extract_petition_text_features,
+    select_usable_rows,
 )
-from ml_uspto.features.transforms import _select_usable_rows
 
 
 def test_n_grounds_dedupes_repeated_citations():
@@ -88,7 +88,7 @@ def test_fintiv_passing_mention_does_not_fire():
 def test_ipr2022_01002_regression():
     """Canonical regression — extracted features match the case-study reference values.
 
-    Reference: docs/features/admissible_documents_analysis.md §2.5/2.6.
+    Reference: docs/engineering/features/admissible_documents_analysis.md §2.5/2.6.
     Synthetic-but-faithful slice of the IPR2022-01002 petition.
     """
     text = (
@@ -130,21 +130,21 @@ def _frame_with_texts(texts: list[object]) -> pd.DataFrame:
     )
 
 
-def test_select_usable_rows_drops_nan_and_blank_sentinel():
+def testselect_usable_rows_drops_nan_and_blank_sentinel():
     """NaN cache misses and the ingest driver's literal 'BLANK' sentinel both drop."""
     frame = _frame_with_texts([np.nan, "BLANK", "x" * MIN_PETITION_TEXT_CHARS])
-    out = _select_usable_rows(frame)
+    out = select_usable_rows(frame)
     assert list(out["trial_number"]) == ["IPR2024-00002"]
 
 
-def test_select_usable_rows_drops_whitespace_only_short_text():
+def testselect_usable_rows_drops_whitespace_only_short_text():
     """All-whitespace pdfplumber output is below the threshold and drops."""
     frame = _frame_with_texts(["\n" * 100, "x" * MIN_PETITION_TEXT_CHARS])
-    out = _select_usable_rows(frame)
+    out = select_usable_rows(frame)
     assert len(out) == 1
 
 
-def test_select_usable_rows_keeps_text_at_threshold():
+def testselect_usable_rows_keeps_text_at_threshold():
     """Text whose length equals the threshold is the inclusion boundary."""
     frame = _frame_with_texts(
         [
@@ -153,21 +153,21 @@ def test_select_usable_rows_keeps_text_at_threshold():
             "x" * (MIN_PETITION_TEXT_CHARS + 1),
         ]
     )
-    out = _select_usable_rows(frame)
+    out = select_usable_rows(frame)
     assert list(out["trial_number"]) == ["IPR2024-00001", "IPR2024-00002"]
 
 
-def test_select_usable_rows_no_op_when_column_missing():
+def testselect_usable_rows_no_op_when_column_missing():
     """Missing `petition_text` column → no-op, mirrors the conditional Tier A path."""
     frame = pd.DataFrame({"trial_number": ["IPR2024-00001"]})
-    out = _select_usable_rows(frame)
+    out = select_usable_rows(frame)
     assert len(out) == 1
     assert list(out.columns) == ["trial_number"]
 
 
-def test_select_usable_rows_returns_copy():
+def testselect_usable_rows_returns_copy():
     """Mutating the returned frame must not write back through to the input."""
     frame = _frame_with_texts(["x" * MIN_PETITION_TEXT_CHARS])
-    out = _select_usable_rows(frame)
+    out = select_usable_rows(frame)
     out.iloc[0, out.columns.get_loc("petition_text")] = "mutated"
     assert frame.iloc[0]["petition_text"] != "mutated"

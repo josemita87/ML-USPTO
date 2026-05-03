@@ -87,7 +87,6 @@ def test_t0_filter_drops_post_t0_trial_and_banned_events():
     assert features["n_aa_pre_t0"].iloc[0] == 1
     assert features["n_maint_pre_t0"].iloc[0] == 1
     assert features["n_other_pre_t0"].iloc[0] == 1
-    assert features["n_office_actions"].iloc[0] == 1  # alias for EX
 
 
 def test_assignments_drop_post_t0_and_dedup_assignees():

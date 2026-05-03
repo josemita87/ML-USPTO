@@ -11,8 +11,6 @@ from ml_uspto.features.schemas.enums import EventCategory
 # (0 events is what an empty bag would have produced upstream).
 PATENT_COUNT_FEATURES: tuple[str, ...] = (
     "n_events_pre_t0",
-    "n_office_actions",
-    "n_ids_filings",
     "n_assignments_pre_t0",
     "n_distinct_assignees_pre_t0",
     "n_parent_applications",
@@ -27,7 +25,7 @@ PATENT_COUNT_FEATURES: tuple[str, ...] = (
 
 # Patent features whose NaN carries a distinct meaning from 0 — each
 # gets a paired `<name>_missing` indicator and median-filled value.
-# See docs/features/patent_file_wrapper_features.md §"Missingness semantics".
+# See docs/engineering/features/patent_file_wrapper_features.md §"Missingness semantics".
 #
 # `days_since_last_assignment` is intentionally absent: its missingness
 # is exactly `n_assignments_pre_t0 == 0`, surfaced as the
@@ -72,7 +70,7 @@ FREQUENCY_CATEGORICAL_COLUMNS: tuple[str, ...] = (
 MIN_PETITION_TEXT_CHARS: int = 5_000
 
 # Output-contract column set produced by
-# `transforms._aggregate_petition_text_row`. Kept here so the feature
+# `petition_text.aggregate_petition_text_row`. Kept here so the feature
 # spec is revisable without touching the aggregation function.
 PETITION_TEXT_FEATURE_KEYS: tuple[str, ...] = (
     "n_grounds",

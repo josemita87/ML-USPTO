@@ -53,8 +53,8 @@ from pathlib import Path
 
 import pytest
 
-from ml_uspto.features.transforms import (
-    _aggregate_petition_text_row as extract_features,
+from ml_uspto.features.petition_text import (
+    aggregate_petition_text_row as extract_features,
 )
 from ml_uspto.ingest.schemas.enums import Stage
 from ml_uspto.paths import raw_dir
@@ -231,8 +231,8 @@ PETITION_GROUND_TRUTH: dict[str, dict] = {
     # Full Fintiv (Factor 1-4 colon-headed) + Sotera stip; sub-grounds
     # 1A/1B/2A/2B → distinct prefixes {1,2}.
     "IPR2022-00500": dict(sotera=True,  fintiv=True,  n_grounds=2),
-    # Canonical case-study trial (docs/features/admissible_documents
-    # _analysis.md §2). Sotera fires on "will cease asserting ...
+    # Canonical case-study trial (docs/engineering/features/admissible
+    # _documents_analysis.md §2). Sotera fires on "will cease asserting ...
     # invalidity". The Fintiv discussion uses bare canonical-keyword
     # numbered subsections ("1. No evidence regarding a stay",
     # "2. Parallel proceeding trial date", "3. Investment in parallel
@@ -384,7 +384,7 @@ PETITION_GROUND_TRUTH: dict[str, dict] = {
 
 def _cache_path(trial: str) -> Path:
     """Resolve the cached petition-text path for a trial."""
-    return raw_dir() / Stage.PETITION_TEXTS.value / f"{trial}.txt"
+    return raw_dir() / Stage.PETITION_TEXTS / f"{trial}.txt"
 
 
 def _load_cached(trial: str) -> str | None:

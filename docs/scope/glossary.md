@@ -1,6 +1,6 @@
 # PTAB Scope and Terminology
 
-Short reference for the PTAB concepts that show up in this project, and what is in/out of scope for the trial-outcome model. Complements `../api/api_feature_map.md` (how to extract features) and `domain_notes.md` (why features matter).
+Short reference for the PTAB concepts that show up in this project, and what is in/out of scope for the trial-outcome model. Complements `../api/api_feature_map.md` (how to extract features) and `context.md` (why features matter).
 
 ---
 
@@ -141,16 +141,16 @@ These come up alongside the statute numbers and have their own implications:
 
 | Term | Plain English | Where to learn more |
 |---|---|---|
-| **Fintiv factors** | A 6-part test the PTAB uses to decide whether to refuse an IPR because a parallel district-court trial will reach the same answer first. Named after a 2020 PTAB case (*Apple v. Fintiv*). | §5 below + `domain_notes.md` |
-| **Sotera stipulation** | A petitioner's promise: "if you take this IPR, I will not raise these same invalidity arguments in district court." Used to defuse Fintiv factor 4. Named after the 2020 *Sotera Wireless* case. | `domain_notes.md` |
-| **General Plastic factors** | A 7-part test for refusing IPRs when a petitioner stacks multiple petitions against the same patent. Named after the 2017 *General Plastic* case. | `domain_notes.md` |
-| **POPR** | Patent Owner's Preliminary Response — the patent owner's first reply to the petition (~3 months after petition). | §1 above (decision), `../examples/ipr_lifecycle_case_study.md` |
+| **Fintiv factors** | A 6-part test the PTAB uses to decide whether to refuse an IPR because a parallel district-court trial will reach the same answer first. Named after a 2020 PTAB case (*Apple v. Fintiv*). | §5 below + `context.md` |
+| **Sotera stipulation** | A petitioner's promise: "if you take this IPR, I will not raise these same invalidity arguments in district court." Used to defuse Fintiv factor 4. Named after the 2020 *Sotera Wireless* case. | `context.md` |
+| **General Plastic factors** | A 7-part test for refusing IPRs when a petitioner stacks multiple petitions against the same patent. Named after the 2017 *General Plastic* case. | `context.md` |
+| **POPR** | Patent Owner's Preliminary Response — the patent owner's first reply to the petition (~3 months after petition). | §1 above (decision), `../scope/lifecycle_case_study.md` |
 | **POR** | Patent Owner Response — the substantive reply after institution. | Same |
 | **FWD** | Final Written Decision — the PTAB's final ruling on the merits. | Same |
 | **RPI** | Real Party in Interest — the actual entity behind a petition or patent (not just the named party). Required disclosure under § 42.8(b)(1). | §4.3 above |
 | **POSITA** | Person of Ordinary Skill in the Art — a hypothetical "average expert in this field" the PTAB uses as a reference for what's "obvious." Every petition defines one. | This doc |
 | **Critical date** | The cutoff date for what counts as prior art. Tied to the patent's claimed priority date. | This doc |
-| **NPE** | Non-Practicing Entity — a company that owns patents but doesn't make products (often called "patent troll" pejoratively). NPEs sue more aggressively. | `../features/patent_file_wrapper_features.md` |
+| **NPE** | Non-Practicing Entity — a company that owns patents but doesn't make products (often called "patent troll" pejoratively). NPEs sue more aggressively. | `../engineering/features/patent_file_wrapper_features.md` |
 
 ---
 
@@ -182,42 +182,16 @@ In a normal courtroom you'd want all three to know what really happened. But our
 | 2 | The patent owner (defending) | Preliminary Response (POPR) | ~3 months after T₀ | **No — leaks** |
 | 3 | The PTAB judges (deciding) | Institution Decision | ~6 months after T₀ | **No — leaks** |
 
-### 5.2 Future extraction: advocacy, not adjudication
-
-What's in the petition's §IV is the petitioner's *anticipated framing* — how they think the Fintiv analysis will go before anyone has pushed back. It is sales pitch, not ruling. If v2 extracts Fintiv features, two consequences matter:
-
-1. **Quality is itself a feature.** A petition that walks all six factors with specific dates and citations signals a sophisticated, well-prepared petitioner. A petition that hand-waves §IV signals either a weak case or unsophisticated counsel. *Thoroughness of the discussion* predicts independently of whether the claims are correct.
-2. **Sotera stipulation is the exception.** Most Fintiv content is rhetoric, but the Sotera stipulation ("we will not pursue these invalidity arguments in district court") is a **binding commitment** the PTAB can hold the petitioner to. That single phrase is higher-signal than the rest of §IV combined.
-
-### 5.3 The six factors (v2 extraction targets)
-
-The factors are standardized — *Fintiv* (PTAB 2020) lists them as a numbered set, so petitions follow the same numbering in §IV. Regex by factor number is reliable.
-
-| # | Factor | Plain-English question | Petition tells us | Extraction target |
-|---|---|---|---|---|
-| 1 | Stay of parallel litigation | Has the court paused the lawsuit (or will it)? | "We filed a motion to stay" / "no motion filed" / "court denied stay" | binary `stay_motion_filed`, `stay_granted` |
-| 2 | Trial date | When does the court trial happen vs. when would the FWD issue? | An exact jury / FWD date pair | `days_petition_to_jury_date`, `jury_before_fwd_flag` |
-| 3 | Investment in parallel proceeding | How much work has the court already done? | "Fact discovery closes 2023-03-29" / "claim construction not yet held" | enum: pre-discovery / mid-discovery / post-claim-construction |
-| 4 | Overlapping issues | Will the same arguments get raised in both places? | The Sotera stipulation lives here | binary `sotera_stipulation_present` (very high signal) |
-| 5 | Petitioner = defendant? | Is the petitioner the same entity sued in court? | "Petitioner is a defendant in the parallel litigation" | binary `petitioner_is_defendant` |
-| 6 | Other circumstances | Any other reason for/against, including merits | "Our merits are very strong" — usually self-serving boilerplate | low-signal text |
-
-Future petition-text extraction reduces to three things:
-
-1. Does §IV exist and address Fintiv at all? (binary — silence is itself a signal)
-2. Does it contain a Sotera-style stipulation? (regex on phrases like "will not pursue", "stipulate", "agree not to assert")
-3. What dates appear under Factor 2? (regex for "trial date", "jury selection", "fact discovery")
-
-Everything else is gravy.
-
-### 5.4 Why we never read the POPR or Institution Decision
+### 5.2 Why we never read the POPR or Institution Decision
 
 The POPR contains the patent owner's Fintiv counter-arguments, and the Institution Decision contains the PTAB's official factor-by-factor scoring — both would be richer than what the petition alone offers. But both have `documentFilingDate > T₀` and so leak the future per `prediction_scope.md` §4. They are excluded from the feature pipeline.
 
 If we ever want **ground-truth Fintiv labels** for evaluation or sanity-checking (rather than features), the Institution Decision's text is where the official scoring lives. That's a labeling exercise, not a feature exercise.
 
-### 5.5 Cross-references
+The signal we *can* read from the petition is captured today as the Tier A `mentions_fintiv_factors` flag (≥3 distinct factor indices appearing through any of seven phrasing patterns) — see `../engineering/features/admissible_documents_analysis.md` §2.
 
-- `../features/admissible_documents_analysis.md` §2.3 — the actual §IV section we extracted from the example petition, with verbatim signal pulls.
-- `domain_notes.md` — domain-expert context on why Fintiv exists and how the legal community reacts to it.
+### 5.3 Cross-references
+
+- `../engineering/features/admissible_documents_analysis.md` §2 — the petition-side §IV signals we actually extract today.
+- `context.md` — political-regime context: Fintiv was strengthened, weakened, then strengthened again across three USPTO-director administrations.
 - `prediction_scope.md` §4 — the leakage rule that excludes voices 2 and 3.

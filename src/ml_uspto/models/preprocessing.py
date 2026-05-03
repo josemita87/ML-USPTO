@@ -14,6 +14,7 @@ from ml_uspto.features.schemas.constants import (
     FREQUENCY_CATEGORICAL_COLUMNS,
     OHE_CATEGORICAL_COLUMNS,
 )
+from ml_uspto.models.schemas.constants import MISSING_CATEGORY_SENTINEL
 
 
 class FrequencyEncoder(BaseEstimator, TransformerMixin):
@@ -60,9 +61,6 @@ class FrequencyEncoder(BaseEstimator, TransformerMixin):
         return pd.DataFrame(np.asarray(X))
 
 
-_MISSING_CATEGORY_SENTINEL = "__missing__"
-
-
 def build_preprocessor() -> ColumnTransformer:
     """Build the train-fit-only preprocessor for the model-ready frame.
 
@@ -88,7 +86,7 @@ def build_preprocessor() -> ColumnTransformer:
                 "fill_missing",
                 SimpleImputer(
                     strategy="constant",
-                    fill_value=_MISSING_CATEGORY_SENTINEL,
+                    fill_value=MISSING_CATEGORY_SENTINEL,
                 ),
             ),
             (

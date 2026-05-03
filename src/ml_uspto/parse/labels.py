@@ -210,7 +210,7 @@ def build_labels(
             doc_id = str(df.at[idx, "document_identifier"]).strip()
             if not doc_id:
                 continue
-            payload = storage.load_blob(Stage.DECISION_TEXTS.value, doc_id, "txt")
+            payload = storage.load_blob(Stage.DECISION_TEXTS, doc_id, "txt")
             if payload is None:
                 continue
             label = extract_outcome(payload.decode("utf-8", errors="replace"))

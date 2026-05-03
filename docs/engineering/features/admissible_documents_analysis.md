@@ -1,6 +1,6 @@
 # Admissible Documents — Inspection & Feature Extraction Plan
 
-> Statute / rule citations in this doc (e.g. `§ 42.8`, `§ 315(b)`, `§ 102(e)`) are explained in plain English in `../scope/ptab_scope_and_terminology.md` §4 — the canonical glossary. Same applies for terms like *Fintiv*, *Sotera stipulation*, *POSITA*, *RPI*.
+> Statute / rule citations in this doc (e.g. `§ 42.8`, `§ 315(b)`, `§ 102(e)`) are explained in plain English in `../scope/glossary.md` §4 — the canonical glossary. Same applies for terms like *Fintiv*, *Sotera stipulation*, *POSITA*, *RPI*.
 
 Concrete inspection of the 46 admissible PDFs of `IPR2022-01002` (Samsung+Apple v. Smart Mobile, '083 patent). Output is two-fold: (a) what each document actually contains, and (b) what the per-tier feature pipeline should extract. T₀ = 2022-05-23.
 
@@ -41,7 +41,7 @@ flowchart TB
 
 ## 2. Tier 1 — Petition (Paper 3)
 
-The single most information-dense document in the case. Petitions follow the same skeleton because patent-procedure rules force them to (`../scope/ptab_scope_and_terminology.md` §4):
+The single most information-dense document in the case. Petitions follow the same skeleton because patent-procedure rules force them to (`../scope/glossary.md` §4):
 
 ```mermaid
 flowchart LR
@@ -199,7 +199,7 @@ Both extracted from the petition we already need to read.
 
 ## 5. Demoted source — Parallel-Lawsuit Exhibits *(was Tier 2)*
 
-The parallel-lawsuit exhibits (Ex 1031–1034, 1041–1043, ~13.1 MB) are no longer in the read pipeline. These are documents from the **separate district-court infringement lawsuit** that the patent owner filed against the petitioner — the petitioner attaches them as evidence about the parallel proceeding because Fintiv (`../scope/ptab_scope_and_terminology.md` §5) requires the PTAB to know what's happening in court.
+The parallel-lawsuit exhibits (Ex 1031–1034, 1041–1043, ~13.1 MB) are no longer in the read pipeline. These are documents from the **separate district-court infringement lawsuit** that the patent owner filed against the petitioner — the petitioner attaches them as evidence about the parallel proceeding because Fintiv (`../scope/glossary.md` §5) requires the PTAB to know what's happening in court.
 
 Earlier drafts had them as Tier 2; on closer inspection they're redundant for our model:
 
@@ -277,7 +277,10 @@ This is before joining the patent-side file-wrapper features described in `paten
 
 ### Deferred implementation subset
 
-`PetitionTextFeatures` in `src/ml_uspto/schemas/models.py` defines **~13 fields** — the core structural counts (word count, page count, claims challenged, grounds, exhibits, prior-art refs, expert declarations) and the highest-signal Tier-1 statutory/procedural booleans (n_grounds_102, n_grounds_103, has_sotera_stipulation, mentions_fintiv_factors, discloses_prior_iprs_same_patent, n_real_parties_in_interest, claim_construction_disputed_terms). This is a schema stub only today: the current v1 pipeline stores `petition_pdf_uri` but does not download petition PDFs or populate `PetitionTextFeatures`. The remaining ~40 features in this catalog (ranking-notice fields, prior-art exhibit-list derivations like `npl_share` / `mean_reference_age_at_critical_date`, finer §IV / §VI.B substructure) are later schema-additive work. NLP / embeddings on petition text remain out of scope for the first petition-text pass.
+**Tier A (shipped).** Five regex-derived features land on the joined frame today, listed in `src/ml_uspto/features/schemas/constants.py::PETITION_TEXT_FEATURE_KEYS`:
+`n_grounds`, `n_grounds_102`, `n_grounds_103`, `has_sotera_stipulation`, `mentions_fintiv_factors`. Pipeline: `drivers/run_ingest_petition_text.py` fetches each petition's PDF, pdfplumber-extracts under `Stage.PETITION_TEXTS`, and `parse/petitions.py::build_petition_texts_frame` assembles `Frame.PETITION_TEXTS`; the joiner attaches `petition_text` as a column, and `features/petition_text.py::aggregate_petition_text_row` runs the regexes per row. Pattern catalog: `parse/schemas/patterns.py`.
+
+**Tier 1/2 (deferred v2).** The remaining ~50 features in this catalog (structural counts beyond `n_grounds`, ranking-notice fields, prior-art exhibit-list derivations like `npl_share` / `mean_reference_age_at_critical_date`, finer §IV / §VI.B substructure, RPI-list extraction, claim-construction term enumeration) are later schema-additive work. NLP / embeddings on petition text remain out of scope for v1 — Tier A's high-precision regex bar (see CLAUDE.md "Regex feature precision discipline") is the gate any new petition-text feature has to clear.
 
 ---
 
@@ -296,6 +299,8 @@ Current v1 ingestion opens petition PDFs (Tier A regex feature inputs); the othe
 - `../scope/prediction_scope.md` §4 — leakage rule (the why behind the T₀ filter).
 - `../scope/prediction_scope.md` §5.2 — Tier A petition-text features in v1; Tier 1/2 deferred.
 - `patent_file_wrapper_features.md` — patent-side features that join on `patentNumber`.
-- `../examples/ipr_lifecycle_case_study.md` — the full lifecycle this scope deliberately ignores past T₀.
-- `src/ml_uspto/parse/petitions.py` — current petition picker and assembler.
-- `src/ml_uspto/features/transforms.py` — current T₀-filtered structured-feature builder.
+- `../scope/lifecycle_case_study.md` — the full lifecycle this scope deliberately ignores past T₀.
+- `src/ml_uspto/parse/petitions.py` — petition picker, assembler, and `build_petition_texts_frame` (cached blobs → `Frame.PETITION_TEXTS`).
+- `src/ml_uspto/features/transforms.py` — T₀-filtered structured-feature orchestrator.
+- `src/ml_uspto/features/petition_text.py` — Tier A regex aggregator (`aggregate_petition_text_row`, `select_usable_rows`).
+- `src/ml_uspto/features/patent_aggregator.py` — patent-side row-local T₀ aggregation off `Frame.PATENTS`.

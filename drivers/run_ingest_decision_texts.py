@@ -7,7 +7,7 @@ from ml_uspto.clients.storage import get_storage
 from ml_uspto.clients.uspto import USPTOClient
 from ml_uspto.ingest.decisions import enumerate_missing_fwd_pdfs
 from ml_uspto.ingest.fetch import fetch_decision_pdfs
-from ml_uspto.ingest.schemas.enums import FwdPdfCandidateColumn as Col
+from ml_uspto.ingest.schemas.enums import FwdPdfCandidateColumn
 from ml_uspto.schemas.enums import Frame
 
 
@@ -16,8 +16,8 @@ def main() -> None:
 
     Cold start (~1.1k candidates) and weekly cron (~30-50 deltas as new FWDs
     issue) run the same code path: ``enumerate_missing_fwd_pdfs`` re-derives
-    the candidate list each invocation from ``Frame.TRIALS`` plus the raw
-    ``Stage.DECISIONS`` cache plus an ``iter_blob_keys`` lookup against
+    the candidate list each invocation from ``Frame.TRIALS`` plus
+    ``Frame.DECISIONS`` plus an ``iter_blob_keys`` lookup against
     ``Stage.DECISION_TEXTS``. There is no persistent manifest beyond the
     cache itself. Each successful fetch downloads the PDF, extracts full text
     via pdfplumber, and persists only the text — the binary is never written
@@ -40,8 +40,9 @@ def main() -> None:
 
     storage = get_storage()
     trials = storage.load_frame(Frame.TRIALS)
+    decisions = storage.load_frame(Frame.DECISIONS)
 
-    candidates = enumerate_missing_fwd_pdfs(storage, trials=trials)
+    candidates = enumerate_missing_fwd_pdfs(storage, trials=trials, decisions=decisions)
 
     print(f"candidates: {len(candidates)}")
     if candidates.empty:
@@ -50,9 +51,9 @@ def main() -> None:
     if args.dry_run:
         head = candidates.head(5)[
             [
-                Col.TRIAL_NUMBER.value,
-                Col.DOCUMENT_IDENTIFIER.value,
-                Col.DECISION_ISSUE_DATE.value,
+                FwdPdfCandidateColumn.TRIAL_NUMBER,
+                FwdPdfCandidateColumn.DOCUMENT_IDENTIFIER,
+                FwdPdfCandidateColumn.DECISION_ISSUE_DATE,
             ]
         ]
         print(head.to_string(index=False))

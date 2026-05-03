@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
-from datetime import date, datetime
 from io import BytesIO
-from pathlib import Path
 from typing import Any
 
 import boto3
@@ -16,13 +14,7 @@ from botocore.exceptions import ClientError
 from ml_uspto.schemas.constants import S3_NOT_FOUND_CODES
 from ml_uspto.schemas.enums import Frame
 
-
-def _json_default(obj: Any) -> str:
-    if isinstance(obj, (date, datetime)):
-        return obj.isoformat()
-    if isinstance(obj, Path):
-        return str(obj)
-    raise TypeError(f"Not JSON serializable: {type(obj).__name__}")
+from ._serialization import json_default
 
 
 class S3Storage:
@@ -93,7 +85,7 @@ class S3Storage:
 
     def save_object(self, bucket: str, key: str, payload: dict[str, Any]) -> None:
         """Encode `payload` as JSON and PUT under the object key."""
-        body = json.dumps(payload, default=_json_default).encode("utf-8")
+        body = json.dumps(payload, default=json_default).encode("utf-8")
         self._client.put_object(
             Bucket=self._bucket, Key=self._object_key(bucket, key), Body=body
         )

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from ml_uspto.protocols.storage import Storage
 from ml_uspto.settings import get_settings
 
 from .local import LocalStorage
 from .s3 import S3Storage
 
 
-def get_storage():
+def get_storage() -> Storage:
     """Resolve the storage backend from settings.
 
     Reads `settings.storage` (which sources `ML_USPTO_STORAGE` and

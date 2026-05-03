@@ -2,7 +2,7 @@
 
 A close-read of one fully-completed IPR trial, used to map how an IPR proceeding actually unfolds in time, what papers exist at each phase, and how the API surfaces (proceedings / decisions / per-document) align to it. The aim is **structural understanding** of the full lifecycle.
 
-> **Scope reminder.** Under `../scope/prediction_scope.md` §4, only events at or before T₀ (the petition filing date) are admissible as features. **Phases 3–8 below are out of scope as feature sources**; they are documented here for orientation and to clarify what the model deliberately ignores. The terminating FWD (Phase 6 or 8) supplies the **label**, never features. See `../features/admissible_documents_analysis.md` for the actual feature pipeline.
+> **Scope reminder.** Under `prediction_scope.md` §4, only events at or before T₀ (the petition filing date) are admissible as features. **Phases 3–8 below are out of scope as feature sources**; they are documented here for orientation and to clarify what the model deliberately ignores. The terminating FWD (Phase 6 or 8) supplies the **label**, never features. See `../engineering/features/admissible_documents_analysis.md` for the actual feature pipeline.
 
 Source data on disk: `data/raw/proceedings/IPR2022-01002/`.
 
@@ -197,7 +197,7 @@ The decisions endpoint returns exactly 3 records for this trial, each carrying s
 | 48 | 2026-02-20 | `Vacated/Remanded` | — | — | CAFC mandate landed; PTAB records it as a decision-type paper but no statute/issue tagging |
 | 52 | 2026-04-22 | `Final Written Decision On CAFC Remand` | `[102, 103]` | `[37 CFR 42.100, 37 CFR 42.73, 35 USC 311, 35 USC 318]` | FWD on remand — now both **anticipation** and **obviousness** addressed (CAFC apparently directed the Board to consider 102 grounds it had skipped) |
 
-This is exactly the shape the **label assembly** needs: every meaningful Board decision is a row in the decisions endpoint with structured outcome + grounds tags, so the binary cancellation label is recoverable from `decisionData.trialOutcomeCategory` alone — no PDF parsing required. The structured fields don't carry the *reasoning* (Fintiv per-factor ratings, dispositive factor); under the current scope those would require parsing the FWD PDF, which is post-T₀ and excluded as a feature source per `../scope/prediction_scope.md` §4. The institution-decision and FWD PDFs remain available for *evaluation*-only ground-truth Fintiv labelling.
+This is exactly the shape the **label assembly** needs: every meaningful Board decision is a row in the decisions endpoint with structured outcome + grounds tags, so the binary cancellation label is recoverable from `decisionData.trialOutcomeCategory` alone — no PDF parsing required. The structured fields don't carry the *reasoning* (Fintiv per-factor ratings, dispositive factor); under the current scope those would require parsing the FWD PDF, which is post-T₀ and excluded as a feature source per `prediction_scope.md` §4. The institution-decision and FWD PDFs remain available for *evaluation*-only ground-truth Fintiv labelling.
 
 ---
 
@@ -245,11 +245,11 @@ Things the API **gets wrong or hides**:
 
 ## 9. From phases to features (mostly out of scope)
 
-> Per `../scope/prediction_scope.md` §4, only Phase 1 features are admissible. Phases 3–8 are listed here for orientation; they are **excluded from the feature pipeline** because every event in those phases occurs after T₀.
+> Per `prediction_scope.md` §4, only Phase 1 features are admissible. Phases 3–8 are listed here for orientation; they are **excluded from the feature pipeline** because every event in those phases occurs after T₀.
 
 | Phase | When | In scope as feature? | What we'd have extracted (now excluded) |
 |---|---|---|---|
-| 1 Petition (T₀) | Day 0 | **Yes** | tech_center, art_unit, RPI from petition §VI.A, plus full petition-text feature catalog (`../features/admissible_documents_analysis.md` §2.6) |
+| 1 Petition (T₀) | Day 0 | **Yes** | tech_center, art_unit, RPI from petition §VI.A, plus full petition-text feature catalog (`../engineering/features/admissible_documents_analysis.md` §2.6) |
 | 2 Filing accorded | Day 15 | Borderline — `accordedFilingDate` is admissible if equal to T₀; treat with provenance check | days_to_accorded (small "completeness" signal) |
 | 3 POPR | Day 107 | **No — post-T₀** | POPR text — would have given PO's Fintiv counter-arguments |
 | 4 Institution | Day 196 | **No — post-T₀; supplies label only via terminating FWD logic** | institution_outcome, Fintiv factor ratings, dispositive factor |
@@ -260,7 +260,7 @@ Things the API **gets wrong or hides**:
 
 Cross-phase composites previously sketched (`pace_score`, `activity_burstiness`, `appeal_likelihood_signal`, `evidentiary_intensity`) are all post-T₀ and excluded.
 
-The actual feature extraction plan lives in `../features/admissible_documents_analysis.md` — Phase 1 only, expanded into 54 petition-derived features.
+The actual feature extraction plan lives in `../engineering/features/admissible_documents_analysis.md` — Phase 1 only, expanded into 54 petition-derived features.
 
 ---
 
@@ -272,7 +272,7 @@ This case is structurally rich precisely because it appealed and remanded. About
 2. **Discretionary denials never enter Phase 5+.** A trial denied institution at Phase 4 has at most ~12 papers total. Feature schemas have to gracefully handle this truncated path.
 3. **Settlements terminate mid-trial.** ~22% of trials (4,408 / 19,246) settle. They look like a Phase 5 that ends abruptly with a `Termination - Settled` decision paper rather than a FWD. Lifecycle features must be defined to cope with right-censoring.
 4. **Joinder cases share papers across multiple trial numbers.** Apple's appeal here is one of two simultaneous appeals; some joined trials share filings entirely. Care needed to avoid double-counting at corpus scale.
-5. **Pre-2025 trials use a different discretionary-denial framework** than post-June-2025 trials (see `../scope/domain_notes.md` on policy regimes). Phase-4 features will need a regime indicator.
+5. **Pre-2025 trials use a different discretionary-denial framework** than post-June-2025 trials (see `context.md` on policy regimes). Phase-4 features will need a regime indicator.
 
 ---
 
@@ -304,5 +304,5 @@ For full-corpus ingestion this means **1 zip + N per-document calls per trial**,
 
 - `../api/api_feature_map.md` — endpoint ↔ feature map (this case study is the worked example).
 - `../api/rate_limits.md` — quota implications of per-document iteration at corpus scale.
-- `../scope/domain_notes.md` — the legal-domain context (Fintiv factors, policy regimes, statutory deadlines) referenced throughout.
+- `context.md` — the legal-domain context (Fintiv factors, policy regimes, statutory deadlines) referenced throughout.
 - `../api/proceedings.md` — proceedings-record column dictionary.

@@ -264,7 +264,7 @@ PETITION_FINTIV_FACTOR_ORDINAL_PATTERN: re.Pattern[str] = re.compile(
 # (cardinal "Factor one/two/..." word-form) map to the same digits;
 # the two consuming patterns match disjoint vocabularies, so a single
 # combined lookup keeps the digit-mapping invariant in one place.
-_FINTIV_FACTOR_WORD_TO_INDEX: dict[str, str] = {
+FINTIV_FACTOR_WORD_TO_INDEX: dict[str, str] = {
     "first": "1", "second": "2", "third": "3",
     "fourth": "4", "fifth": "5", "sixth": "6",
     "one": "1", "two": "2", "three": "3",

@@ -50,7 +50,7 @@ def seeded_storage(tmp_path: Path) -> LocalStorage:
     storage = LocalStorage(
         raw_root=tmp_path / "raw", processed_root=tmp_path / "processed"
     )
-    storage.save_blob(Stage.PETITION_TEXTS.value, "IPR2022-CACHED", "txt", b"cached")
+    storage.save_blob(Stage.PETITION_TEXTS, "IPR2022-CACHED", "txt", b"cached")
     return storage
 
 
@@ -81,7 +81,7 @@ def test_all_cached_returns_empty(tmp_path):
     )
     petitions = _petitions_frame()
     for trial in petitions["trial_number"]:
-        storage.save_blob(Stage.PETITION_TEXTS.value, str(trial), "txt", b"x")
+        storage.save_blob(Stage.PETITION_TEXTS, str(trial), "txt", b"x")
     out = enumerate_missing_petition_pdfs(storage, petitions=petitions)
     assert out.empty
 

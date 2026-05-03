@@ -20,8 +20,9 @@ class FwdPdfCandidateColumn(StrEnum):
     `ingest.decisions.enumerate_missing_fwd_pdfs` produces this frame;
     `ingest.fetch.fetch_decision_pdfs` consumes it. Iterating the enum
     yields the canonical column order — pass
-    `[c.value for c in FwdPdfCandidateColumn]` to the `pd.DataFrame`
-    constructor when materializing.
+    `list(FwdPdfCandidateColumn)` to the `pd.DataFrame` constructor
+    when materializing (StrEnum members are str subclasses, so pandas
+    treats them as plain column-name strings).
     """
 
     TRIAL_NUMBER = "trial_number"

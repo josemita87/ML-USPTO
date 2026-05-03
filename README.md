@@ -123,7 +123,7 @@ Deferred feature families:
 2. **Petition-text counts** — claims challenged, prior-art references, exhibits, expert declarations, grounds (102/103).
 3. **Time-correct base rates** — art-unit / tech-center cancellation rates over trials with terminating FWDs strictly before T₀.
 
-The full per-feature catalog and tier demotions live in [`docs/features/admissible_documents_analysis.md`](docs/features/admissible_documents_analysis.md). The leakage rule and disallowed sources live in [`docs/scope/prediction_scope.md`](docs/scope/prediction_scope.md) §4.
+The full per-feature catalog and tier demotions live in [`docs/engineering/features/admissible_documents_analysis.md`](docs/engineering/features/admissible_documents_analysis.md). The leakage rule and disallowed sources live in [`docs/scope/prediction_scope.md`](docs/scope/prediction_scope.md) §4.
 
 ---
 
@@ -138,9 +138,9 @@ The full per-feature catalog and tier demotions live in [`docs/features/admissib
 
 ## 8. Related Files
 
-- [`docs/`](docs/) — technical documentation (start here for API ↔ feature mapping)
-- [`docs/scope/prediction_scope.md`](docs/scope/prediction_scope.md) — what we predict, T₀ leakage rule, label taxonomy
-- [`docs/api/proceedings.md`](docs/api/proceedings.md) — PTAB API proceedings-schema notes
-- [`docs/ops/refresh_lifecycle.md`](docs/ops/refresh_lifecycle.md) — current weekly refresh DAG and persistence model
-- [`docs/plans/2026-04-29-ingestion-pipeline.md`](docs/plans/2026-04-29-ingestion-pipeline.md) — historical ingestion plan
+- [`docs/`](docs/) — technical documentation, organized into four buckets:
+  - [`docs/scope/`](docs/scope/) — *what/why*: prediction target, T₀ leakage rule, domain framing, lifecycle case study
+  - [`docs/api/`](docs/api/) — *external reference*: USPTO ODP endpoints, schemas, rate limits
+  - [`docs/engineering/`](docs/engineering/) — *how it's built*: ingestion pipeline DAG, feature catalog
+  - [`docs/deployment/`](docs/deployment/) — *production infra*: AWS foundation stack
 - [`src/ml_uspto/`](src/ml_uspto/) — package source (`clients/`, `parse/`, `ingest/`, `schemas/`, `paths.py`)

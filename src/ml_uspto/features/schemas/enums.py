@@ -14,3 +14,8 @@ class EventCategory(StrEnum):
     MAINT = "MAINT"
     TRIAL = "TRIAL"
     OTHER = "OTHER"
+
+
+NON_TRIAL_CATEGORIES: tuple[EventCategory, ...] = tuple(
+    cat for cat in EventCategory if cat is not EventCategory.TRIAL
+)

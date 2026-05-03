@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from ml_uspto.parse.utils import to_date
+from ml_uspto.utils import to_date
 from ml_uspto.schemas.models import PatentFileWrapper
 
 

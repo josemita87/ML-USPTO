@@ -56,9 +56,9 @@ def join_all(
          Mismatches are logged per trial and counted on `JoinReport`;
          proceedings wins for all downstream filtering.
       5. Left-join with `patents` on `application_number`. Trials whose
-         patent fetch failed carry NaN for every patent column — the
-         features stage flags those rows via the
-         `patent_features_missing` regime indicator.
+         patent fetch failed carry NaN for every patent column; the
+         features stage fills NaN counts with 0 (treated identically to
+         an empty event bag).
       6. Left-join with `petition_texts` on `trial_number`. Trials
          whose petition PDF hasn't been fetched/extracted yet carry
          NaN for `petition_text`; the features-stage Tier A aggregator
@@ -88,7 +88,7 @@ def join_all(
     # Keep only the merge key + the two columns downstream actually consumes:
     # `petition_filing_date_doc` for the T₀ cross-check below, and
     # `petition_pdf_uri` as the handle for the deferred Tier 1/2 text-feature
-    # stage (see `docs/features/admissible_documents_analysis.md`). Petition
+    # stage (see `docs/engineering/features/admissible_documents_analysis.md`). Petition
     # metadata (title, category, document_id) carries no feature value and is
     # left in `petitions.parquet` rather than ballooning the joined frame.
     petition_cols = ["trial_number", "petition_pdf_uri", "petition_filing_date_doc"]

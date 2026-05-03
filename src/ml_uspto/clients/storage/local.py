@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
-from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -13,13 +12,7 @@ import pandas as pd
 from ml_uspto import paths
 from ml_uspto.schemas.enums import Frame
 
-
-def _json_default(obj: Any) -> str:
-    if isinstance(obj, (date, datetime)):
-        return obj.isoformat()
-    if isinstance(obj, Path):
-        return str(obj)
-    raise TypeError(f"Not JSON serializable: {type(obj).__name__}")
+from ._serialization import json_default
 
 
 class LocalStorage:
@@ -82,7 +75,7 @@ class LocalStorage:
         path = self.raw_root / bucket / f"{key}.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w", encoding="utf-8") as f:
-            json.dump(payload, f, default=_json_default)
+            json.dump(payload, f, default=json_default)
 
     def iter_objects(self, bucket: str) -> Iterator[tuple[str, dict[str, Any]]]:
         """Yield `(key, payload)` for every JSON object in `bucket`, sorted by key."""

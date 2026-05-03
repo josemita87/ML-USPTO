@@ -6,10 +6,8 @@ import logging
 from ml_uspto.clients.storage import get_storage
 from ml_uspto.clients.uspto import USPTOClient
 from ml_uspto.ingest.fetch import fetch_petition_pdfs
-from ml_uspto.ingest.petitions import (
-    build_petition_texts_frame,
-    enumerate_missing_petition_pdfs,
-)
+from ml_uspto.ingest.petitions import enumerate_missing_petition_pdfs
+from ml_uspto.parse.petitions import build_petition_texts_frame
 from ml_uspto.schemas.enums import Frame
 
 

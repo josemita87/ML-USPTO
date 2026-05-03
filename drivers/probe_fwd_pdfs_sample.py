@@ -40,7 +40,7 @@ PARSEABLE_TITLE_RE = re.compile(
 
 def _iter_fwd_candidates(storage: LocalStorage):
     """Yield (year, document_type, parseable_title, candidate_dict) for FWDs."""
-    for _page_key, payload in storage.iter_objects(Stage.DECISIONS.value):
+    for _page_key, payload in storage.iter_objects(Stage.DECISIONS):
         for record in payload.get("patentTrialDocumentDataBag") or []:
             doc = record.get("documentData") or {}
             doc_type = (doc.get("documentTypeDescriptionText") or "").strip()
@@ -131,7 +131,7 @@ def main() -> None:
     sample = _stratified_sample(candidates, target=args.target, seed=args.seed)
     logger.info("Picked %d for download", len(sample))
 
-    manifest_dir = storage.raw_root / Stage.DECISION_TEXTS.value
+    manifest_dir = storage.raw_root / Stage.DECISION_TEXTS
     manifest_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = manifest_dir / "_sample_manifest.json"
 
@@ -139,7 +139,7 @@ def main() -> None:
     enriched: list[dict[str, Any]] = []
     for i, c in enumerate(sample, 1):
         ident = c["document_identifier"]
-        cached_text = storage.load_blob(Stage.DECISION_TEXTS.value, ident, "txt")
+        cached_text = storage.load_blob(Stage.DECISION_TEXTS, ident, "txt")
         if cached_text is not None:
             logger.info("[%d/%d] cache hit %s", i, len(sample), ident)
             text = cached_text.decode("utf-8", errors="replace")
@@ -155,7 +155,7 @@ def main() -> None:
         text, report = _try_extract(payload)
         if text is not None:
             text_bytes = text.encode("utf-8")
-            storage.save_blob(Stage.DECISION_TEXTS.value, ident, "txt", text_bytes)
+            storage.save_blob(Stage.DECISION_TEXTS, ident, "txt", text_bytes)
             size = len(text_bytes)
         else:
             size = 0

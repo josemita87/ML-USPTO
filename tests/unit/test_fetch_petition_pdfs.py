@@ -65,7 +65,7 @@ def test_persists_text(storage, monkeypatch):
     assert res.trial_number == "IPR2022-A"
     assert res.bytes_written is not None and res.bytes_written > 0
 
-    cached = storage.load_blob(Stage.PETITION_TEXTS.value, "IPR2022-A", "txt")
+    cached = storage.load_blob(Stage.PETITION_TEXTS, "IPR2022-A", "txt")
     assert cached is not None
     assert cached.decode("utf-8") == "Page one body.\nPage two body."
 
@@ -82,7 +82,7 @@ def test_http_error_yields_failure_no_cache(storage, monkeypatch):
 
     assert len(results) == 1
     assert results[0].bytes_written is None
-    assert storage.load_blob(Stage.PETITION_TEXTS.value, "IPR2022-FAIL", "txt") is None
+    assert storage.load_blob(Stage.PETITION_TEXTS, "IPR2022-FAIL", "txt") is None
 
 
 def test_pdfplumber_error_yields_failure_no_cache(storage, monkeypatch):
@@ -99,7 +99,7 @@ def test_pdfplumber_error_yields_failure_no_cache(storage, monkeypatch):
 
     assert len(results) == 1
     assert results[0].bytes_written is None
-    assert storage.load_blob(Stage.PETITION_TEXTS.value, "IPR2022-MALFORMED", "txt") is None
+    assert storage.load_blob(Stage.PETITION_TEXTS, "IPR2022-MALFORMED", "txt") is None
 
 
 def test_empty_payload_yields_failure(storage, monkeypatch):
