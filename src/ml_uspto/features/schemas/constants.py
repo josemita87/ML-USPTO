@@ -1,5 +1,6 @@
 """Subpackage-local constants for `ml_uspto.features`."""
 
+import datetime as dt
 from functools import lru_cache
 
 import yaml
@@ -35,6 +36,7 @@ PATENT_NULLABLE_NUMERIC: tuple[str, ...] = (
 OHE_CATEGORICAL_COLUMNS: tuple[str, ...] = (
     "technology_center",
     "cpc_section",
+    "ptab_era",
 )
 
 # Open-vocab party identifiers; frequencies refit per CV fold.
@@ -73,6 +75,23 @@ BANNED_EVENT_CATEGORIES: frozenset[EventCategory] = frozenset(
 TRIAL_EVENT_PREFIXES: tuple[str, ...] = tuple(_event_cfg.get("banned_prefixes", []))
 
 
+@lru_cache(maxsize=1)
+def _load_ptab_eras() -> dict:
+    with open(paths.PTAB_ERAS_YAML) as f:
+        return yaml.safe_load(f)
+
+
+# Era-name → start-date (inclusive). Eras are left-closed, right-open
+# intervals running until the next era's start; the last era runs to
+# today. Sorted by start date so the era lookup can binary-search.
+PTAB_ERAS: tuple[tuple[str, dt.date], ...] = tuple(
+    sorted(
+        ((name, dt.date.fromisoformat(start)) for name, start in _load_ptab_eras()["eras"].items()),
+        key=lambda kv: kv[1],
+    )
+)
+
+
 __all__ = [
     "PATENT_COUNT_FEATURES",
     "PATENT_NULLABLE_NUMERIC",
@@ -83,4 +102,5 @@ __all__ = [
     "EVENT_CODE_CATEGORIES",
     "BANNED_EVENT_CATEGORIES",
     "TRIAL_EVENT_PREFIXES",
+    "PTAB_ERAS",
 ]

@@ -12,6 +12,7 @@ LABELS_YAML = CONFIG_DIR / "labels.yaml"
 PETITION_PICKER_YAML = CONFIG_DIR / "petition_picker.yaml"
 PARSERS_YAML = CONFIG_DIR / "parsers" / "patents.yaml"
 PATENT_EVENT_CODES_YAML = CONFIG_DIR / "patents" / "event_codes.yaml"
+PTAB_ERAS_YAML = CONFIG_DIR / "ptab_eras.yaml"
 
 
 def raw_dir() -> Path:

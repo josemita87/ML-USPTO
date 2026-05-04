@@ -1,0 +1,28 @@
+# USPTO Director eras (regimes that set PTAB policy environment).
+#
+# The Director of the USPTO is a presidential appointee who sets PTAB
+# policy — most importantly the §314(a) discretionary-denial regime
+# (Fintiv). When Iancu designated `Apple v. Fintiv` precedential on
+# 2020-05-05, instituted-IPR volume dropped sharply. When Vidal's
+# 2022-06-21 memo loosened §314(a), volume and cancellation rates
+# rebounded. These are domain-revisable cutoffs (we may add a new era
+# whenever a new Director takes office or issues a major policy memo),
+# so the taxonomy lives in YAML rather than as inline literals.
+#
+# Each entry is `name: <YYYY-MM-DD>` — the era starts on that date and
+# runs until the next entry's start date. Bucketing by `petition_filing_date`
+# is a left-closed, right-open lookup: an era is `[start, next_start)`.
+# The last entry's era runs to today.
+#
+# Used by `features.transforms.build_features` to derive the
+# `ptab_era` categorical column. It rides through OHE
+# (`OHE_CATEGORICAL_COLUMNS`) and gets a per-era cancellation prior
+# (`PRIOR_GROUP_COLUMNS`).
+eras:
+  pre_iancu:           "1900-01-01"  # Sentinel — anything before Iancu sworn in
+  iancu_pre_fintiv:    "2018-02-08"  # Iancu sworn in
+  iancu_fintiv:        "2020-05-05"  # Fintiv designated precedential
+  hirshfeld_acting:    "2021-01-20"  # Iancu departs at admin transition
+  vidal:               "2022-04-13"  # Vidal sworn in
+  vidal_post_memo:     "2022-06-21"  # Vidal §314(a) memo loosens Fintiv
+  trump_2_post_vidal:  "2025-01-20"  # Vidal departs at admin transition

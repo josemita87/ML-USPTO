@@ -24,6 +24,7 @@ from ml_uspto.features.schemas.constants import (
     PATENT_COUNT_FEATURES,
     PATENT_NULLABLE_NUMERIC,
     PETITION_TEXT_FEATURE_KEYS,
+    PTAB_ERAS,
 )
 
 logger = logging.getLogger(__name__)
@@ -57,6 +58,22 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
 
     features["art_unit_group"] = pd.to_numeric(
         augmented["group_art_unit"].astype(str).str[:3], errors="coerce"
+    )
+
+    # PTAB Director era at petition filing — left-closed/right-open
+    # intervals from `config/ptab_eras.yaml`. Riding through the OHE
+    # branch lets HGBT split on regime directly instead of having to
+    # rediscover (year, month) conjunctions like `year=2020 ∧ month≥5`
+    # that bracket the Fintiv designation. Stashed on `augmented` so
+    # the OHE loop below picks it up like any other categorical.
+    era_starts = pd.to_datetime([s for _, s in PTAB_ERAS]).to_numpy()
+    era_names = np.array([n for n, _ in PTAB_ERAS], dtype=object)
+    era_idx = np.searchsorted(era_starts, pf.to_numpy(), side="right") - 1
+    era_idx_clipped = np.clip(era_idx, 0, len(era_names) - 1)
+    augmented["ptab_era"] = np.where(
+        pf.isna().to_numpy() | (era_idx < 0),
+        None,
+        era_names[era_idx_clipped],
     )
 
     # Paired `<col>_missing` set *before* imputation so the NaN signal survives.
