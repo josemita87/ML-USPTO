@@ -8,9 +8,20 @@ from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassif
 from ml_uspto.models.schemas.enums import ModelName
 
 MODELS: dict[ModelName, Callable[[], Any]] = {
+    # Sweep on the enriched feature matrix (entity_size, inventor_geo,
+    # petition_text_length, n_cpc_codes, n_cpc_subclasses) picked these
+    # knobs as the held-out winner (HO AUC 0.6234 on the 2023+ tail,
+    # mature_days=540). Notable: `max_depth=10` cap underfits badly
+    # (HO 0.575); removing it is the single biggest lever. `max_features=0.3`
+    # lets each split see ~25 of the ~85 post-preprocessing columns —
+    # `sqrt` is too restrictive for this signal-poor matrix where many
+    # weak features need to compose. `min_samples_leaf=5` damps the
+    # variance-floor RF would otherwise hit on rare counsel/party priors.
     ModelName.RANDOM_FOREST: lambda: RandomForestClassifier(
-        n_estimators=200,
-        max_depth=10,
+        n_estimators=500,
+        max_depth=None,
+        max_features=0.3,
+        min_samples_leaf=5,
         class_weight="balanced",
         random_state=42,
         n_jobs=-1,

@@ -43,6 +43,8 @@ def _joined_frame() -> pd.DataFrame:
                 "group_art_unit": "2467",
                 "petitioner_real_party": "Acme",
                 "owner_real_party": "Globex",
+                "entity_size": "Small",
+                "inventor_country_codes": ["US", "US"],
                 # Patent parallel-array cols
                 "filing_date": date(2014, 1, 1),
                 "cpc_codes": ["H04W 88/06", "G06F 17/00"],
@@ -135,15 +137,68 @@ def test_cpc_section_passes_through_first_letter():
 
 
 def test_raw_categoricals_passed_through_unencoded():
-    """Party identifiers and TC are kept raw for the modeling preprocessor."""
+    """Party / entity-size / TC are kept raw for the modeling preprocessor."""
     features = build_features(_joined_frame())
     assert features["technology_center"].iloc[0] == "2400"
     assert features["petitioner_real_party"].iloc[0] == "Acme"
     assert features["owner_real_party"].iloc[0] == "Globex"
+    assert features["entity_size"].iloc[0] == "Small"
     # Frequency / one-hot columns must NOT be emitted by build_features —
     # otherwise we'd be back to corpus-level leakage.
-    for col in ("petitioner_frequency", "owner_frequency", "tc_2400", "cpc_H"):
+    for col in (
+        "petitioner_frequency", "owner_frequency", "tc_2400", "cpc_H",
+        "entity_size_Small",
+    ):
         assert col not in features.columns
+
+
+def test_cpc_count_features_match_array():
+    """`n_cpc_codes` is the array length; `n_cpc_subclasses` collapses to first 4 chars."""
+    df = _joined_frame()
+    df.at[0, "cpc_codes"] = ["H04W 88/06", "H04W 88/07", "G06F 17/00"]
+    features = build_features(df)
+    assert features["n_cpc_codes"].iloc[0] == 3
+    # Two H04W codes + one G06F → 2 distinct first-4-char subclasses.
+    assert features["n_cpc_subclasses"].iloc[0] == 2
+
+
+def test_cpc_count_features_zero_when_array_empty():
+    """Empty/None CPC arrays produce 0 counts (no NaN propagation)."""
+    df = _joined_frame()
+    df.at[0, "cpc_codes"] = []
+    features = build_features(df)
+    assert features["n_cpc_codes"].iloc[0] == 0
+    assert features["n_cpc_subclasses"].iloc[0] == 0
+
+
+def test_inventor_geo_us_only_when_all_codes_us():
+    """All-`US` inventor list buckets as `us_only`."""
+    features = build_features(_joined_frame())
+    assert features["inventor_geo"].iloc[0] == "us_only"
+
+
+def test_inventor_geo_any_foreign_when_mixed():
+    """Any non-`US` inventor flips the bucket to `any_foreign`."""
+    df = _joined_frame()
+    df.at[0, "inventor_country_codes"] = ["US", "DE"]
+    features = build_features(df)
+    assert features["inventor_geo"].iloc[0] == "any_foreign"
+
+
+def test_inventor_geo_none_when_codes_missing():
+    """Missing/empty country list → NaN (rides through as MISSING sentinel downstream)."""
+    df = _joined_frame()
+    df.at[0, "inventor_country_codes"] = None
+    features = build_features(df)
+    assert pd.isna(features["inventor_geo"].iloc[0])
+
+
+def test_petition_text_length_matches_raw_text():
+    """`petition_text_length` reflects the raw character count of the input text."""
+    df = _joined_frame()
+    df.at[0, "petition_text"] = "y" * 12_345
+    features = build_features(df)
+    assert features["petition_text_length"].iloc[0] == 12_345
 
 
 def test_no_recorded_assignment_regime_indicator():

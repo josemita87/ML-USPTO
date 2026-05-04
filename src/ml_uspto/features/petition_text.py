@@ -106,6 +106,10 @@ def aggregate_petition_text_row(text: str) -> dict[str, int]:
             any(p.search(text) is not None for p in PETITION_SOTERA_PATTERNS)
         ),
         "mentions_fintiv_factors": int(fintiv),
+        # Petition complexity / effort proxy. Floor is `MIN_PETITION_TEXT_CHARS`
+        # since `select_usable_rows` drops shorter rows; observed range
+        # ~5K–860K chars on the cohort.
+        "petition_text_length": len(text),
     }
 
 

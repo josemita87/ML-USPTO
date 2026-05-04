@@ -33,10 +33,15 @@ PATENT_NULLABLE_NUMERIC: tuple[str, ...] = (
 )
 
 # Closed taxonomies; OHE column set frozen at train-fit time.
+# `entity_size` ∈ {Regular Undiscounted, Small, Micro, NaN} — small entities
+# show ~5pp higher cancel rate. `inventor_geo` is derived in `transforms`
+# from `inventor_country_codes` and bucketed to {us_only, any_foreign, NaN}.
 OHE_CATEGORICAL_COLUMNS: tuple[str, ...] = (
     "technology_center",
     "cpc_section",
     "ptab_era",
+    "entity_size",
+    "inventor_geo",
 )
 
 # Open-vocab party identifiers; frequencies refit per CV fold.
@@ -55,6 +60,7 @@ PETITION_TEXT_FEATURE_KEYS: tuple[str, ...] = (
     "n_grounds_103",
     "has_sotera_stipulation",
     "mentions_fintiv_factors",
+    "petition_text_length",
 )
 
 

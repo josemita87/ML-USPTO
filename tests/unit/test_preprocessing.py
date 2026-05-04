@@ -41,6 +41,8 @@ def _frame(
             "technology_center": technology_centers,
             "cpc_section": cpc_sections,
             "ptab_era": ptab_eras if ptab_eras is not None else ["iancu_fintiv"] * n,
+            "entity_size": ["Regular Undiscounted"] * n,
+            "inventor_geo": ["us_only"] * n,
             "n_events": n_events,
             "petition_filing_date": pd.to_datetime(
                 dates if dates is not None else ["2020-01-01"] * n
