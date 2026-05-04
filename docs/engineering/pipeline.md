@@ -28,33 +28,37 @@ There are no quarantine frames. Patents that fail aggregation are dropped silent
 Three independent fetch roots — `proceedings`, `decisions`, `petitions` — each paginate `documents/search`-shaped endpoints with no cross-frame dependency. Confluences are downstream:
 
 ```mermaid
-flowchart LR
+flowchart TD
     classDef root fill:#e8f4f8,stroke:#2b6cb0,stroke-width:2px
     classDef confluence fill:#fef3c7,stroke:#92400e,stroke-width:2px
     classDef terminal fill:#dcfce7,stroke:#166534,stroke-width:2px
 
-    proceedings[proceedings<br/>Frame.TRIALS]:::root
-    decisions[decisions<br/>Frame.DECISIONS]:::root
-    petitions[petitions<br/>Frame.PETITIONS]:::root
+    subgraph T1[Tier 1 — independent fetch roots]
+      direction LR
+      proceedings["proceedings<br/>Frame.TRIALS"]:::root
+      decisions["decisions<br/>Frame.DECISIONS"]:::root
+      petitions["petitions<br/>Frame.PETITIONS"]:::root
+    end
 
-    decision_texts[decision_texts<br/>Stage.DECISION_TEXTS blobs]:::confluence
-    petition_texts[petition_texts<br/>Frame.PETITION_TEXTS]
-    patents[patents<br/>Frame.PATENTS]
+    subgraph T2[Tier 2 — document-fetch stages]
+      direction LR
+      patents["patents<br/>Frame.PATENTS"]
+      decision_texts["decision_texts<br/>Stage.DECISION_TEXTS blobs"]:::confluence
+      petition_texts["petition_texts<br/>Frame.PETITION_TEXTS"]
+    end
 
-    joiner[joiner]
-    features[features]:::terminal
+    joiner["joiner<br/>Frame.JOINED_TRIALS"]
+    features["features<br/>Frame.FEATURES"]:::terminal
 
     proceedings --> patents
     proceedings --> decision_texts
     decisions --> decision_texts
     petitions --> petition_texts
 
-    proceedings --> joiner
-    decisions --> joiner
-    petitions --> joiner
+    T1 --> joiner
     patents --> joiner
     petition_texts --> joiner
-    decision_texts -. per-doc blob lookup .-> joiner
+    decision_texts -.->|per-doc blob lookup| joiner
 
     joiner --> features
 ```

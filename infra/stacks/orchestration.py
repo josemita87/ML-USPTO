@@ -1,32 +1,6 @@
 """Orchestration stack — Step Functions DAG + weekly EventBridge trigger.
 
-Composes the long-lived primitives from `FoundationStack` (bucket, secret,
-task role) and `ComputeStack` (cluster, task definition) into a runnable
-weekly pipeline.
-
-DAG (mirrors `docs/ops/refresh_lifecycle.md` §2):
-
-    Parallel {
-        branch A: proceedings → decisions → fwd_texts
-        branch B: petitions
-    } → patents → join → features
-
-Why this shape:
-  - Petitions is independent of trials (per doc), so it runs alongside
-    branch A from t=0.
-  - Patents needs both proceedings + petitions; placing it after the
-    parallel block keeps the DAG legible. ODP enforces burst=1 per key,
-    so parallel branches against the API serialize anyway — Step
-    Functions parallelism here is for failure isolation, not throughput.
-  - Join runs after every ingest stage is populated.
-  - Features runs last — pure pandas on the joined frame, no HTTP.
-
-Each stage is one `EcsRunTask` invocation against the shared task
-definition, parameterised at run-time by the `command` override
-(`-m drivers.<name>`). Same image, same task role, different entrypoint.
-
-EventBridge rule fires weekly (Mondays 02:00 UTC) — adjust schedule
-in-stack if cadence changes.
+DAG mirrors `docs/engineering/pipeline.md` §2.
 """
 
 from __future__ import annotations
@@ -91,9 +65,7 @@ class OrchestrationStack(cdk.Stack):
                 launch_target=sfn_tasks.EcsFargateLaunchTarget(
                     platform_version=ecs.FargatePlatformVersion.LATEST,
                 ),
-                # Public subnets + public IP: tasks need ECR pull + ODP API
-                # egress, no NAT GW provisioned. Tighten with NAT later if
-                # the bucket grows enough to justify the fixed cost.
+                # Public subnet + public IP: ECR pull + ODP egress, no NAT GW.
                 subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
                 assign_public_ip=True,
                 security_groups=[task_sg],
@@ -105,8 +77,7 @@ class OrchestrationStack(cdk.Stack):
                 ],
                 # Sync — block on task completion, surface non-zero exit as state failure.
                 integration_pattern=sfn.IntegrationPattern.RUN_JOB,
-                # Hard ceiling per stage; observed wall-clocks all fit
-                # comfortably (cold FWD-text backfill ~63 min for 1,089 PDFs).
+                # Cold FWD-text backfill is the slowest observed (~63 min).
                 task_timeout=sfn.Timeout.duration(cdk.Duration.hours(2)),
             )
             task.add_retry(
@@ -119,23 +90,26 @@ class OrchestrationStack(cdk.Stack):
 
         proceedings = stage("RunProceedings", "run_ingest_proceedings")
         decisions = stage("RunDecisions", "run_ingest_decisions")
-        fwd_texts = stage("RunFwdTexts", "run_ingest_decision_texts")
         petitions = stage("RunPetitions", "run_ingest_petitions")
-        petition_texts = stage("RunPetitionTexts", "run_ingest_petition_text")
         patents = stage("RunPatents", "run_ingest_patents")
+        petition_texts = stage("RunPetitionTexts", "run_ingest_petition_text")
+        fwd_texts = stage("RunFwdTexts", "run_ingest_decision_texts")
         join = stage("RunJoin", "run_join")
         features = stage("RunFeatures", "run_features")
 
-        branch_a = proceedings.next(decisions).next(fwd_texts)
-        branch_b = petitions.next(petition_texts)
+        # fwd_texts runs serially after the parallel block — Step Functions has no mid-parallel join.
+        branch_a = proceedings.next(patents)
+        branch_b = decisions
+        branch_c = petitions.next(petition_texts)
 
         parallel = (
-            sfn.Parallel(self, "TrialsAndPetitions")
+            sfn.Parallel(self, "FetchRoots")
             .branch(branch_a)
             .branch(branch_b)
+            .branch(branch_c)
         )
 
-        definition = parallel.next(patents).next(join).next(features)
+        definition = parallel.next(fwd_texts).next(join).next(features)
 
         self.state_machine = sfn.StateMachine(
             self,

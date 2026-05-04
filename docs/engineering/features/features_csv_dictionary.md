@@ -229,3 +229,5 @@ to prevent.
 - `src/ml_uspto/models/preprocessing.py` — the modeling-side
   `build_preprocessor()` / `build_pipeline()` that turn this
   intermediate into the final design matrix per fold.
+- `../preprocessing.md` — the four ColumnTransformer branches and
+  the prior-encoder rolling-fallback design.

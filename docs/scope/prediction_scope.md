@@ -263,6 +263,7 @@ The four `docs/` buckets and where this scope doc fits within them:
 | `api/` | `proceedings.md`, `patents.md`, `rate_limits.md`, `bulk_datasets.md` | External USPTO ODP reference. |
 | `engineering/` | `pipeline.md` | Ingest DAG, cache flow, label resolution. |
 | `engineering/` | `storage.md`, `parsers.md`, `frames.md`, `configuration.md` | How the project is built (storage backends, flatten engine, parquet contracts, settings). |
+| `engineering/` | `preprocessing.md` | Modeling-side preprocessor (priors, frequency, OHE, imputer) and the rolling-fallback design. |
 | `engineering/features/` | `admissible_documents_analysis.md`, `features_csv_dictionary.md`, `patent_file_wrapper_features.md` | Feature catalogs. |
 | `deployment/` | `foundation_stack.md` | Production AWS infra. |
 
