@@ -6,7 +6,11 @@ The whole point of this preprocessor is leakage discipline:
     categories cannot expand the matrix;
   - the median imputer must use the train median;
   - the per-group cancellation priors must use only training rows
-    with `petition_filing_date < this_row's_T₀` (strict).
+    whose **label-resolution date** (FWD-issue or termination) is
+    strictly before this row's T₀. A training trial whose petition
+    pre-dates T₀ but whose FWD post-dates T₀ has a label that wasn't
+    observable at T₀ and must be excluded from the rolling rate
+    (per `docs/scope/prediction_scope.md` §4).
 
 These tests construct deliberately asymmetric train/test frames and
 assert the boundary holds.
@@ -32,8 +36,14 @@ def _frame(
     dates: list[str] | None = None,
     patent_numbers: list[str] | None = None,
     ptab_eras: list[str] | None = None,
+    resolution_dates: list[str] | None = None,
 ) -> pd.DataFrame:
     n = len(petitioners)
+    pf_dates = pd.to_datetime(dates if dates is not None else ["2020-01-01"] * n)
+    # Default `label_resolution_date` to T₀ — keeps the existing OHE /
+    # imputer / frequency-encoder tests behaviorally identical to the
+    # pre-resolution-date world. Tests that exercise the gating
+    # explicitly pass `resolution_dates`.
     return pd.DataFrame(
         {
             "petitioner_real_party": petitioners,
@@ -44,9 +54,8 @@ def _frame(
             "entity_size": ["Regular Undiscounted"] * n,
             "inventor_geo": ["us_only"] * n,
             "n_events": n_events,
-            "petition_filing_date": pd.to_datetime(
-                dates if dates is not None else ["2020-01-01"] * n
-            ),
+            "petition_filing_date": pf_dates,
+            "label_resolution_date": pd.to_datetime(resolution_dates) if resolution_dates is not None else pf_dates,
             "patent_number": patent_numbers if patent_numbers is not None else [f"P{i}" for i in range(n)],
         }
     )
@@ -124,13 +133,20 @@ def test_preprocessor_median_imputer_uses_train_median():
 
 
 def test_prior_encoder_strict_t0_filter_and_count():
-    """A row's prior excludes training rows whose T₀ equals or exceeds its own T₀."""
+    """A row's prior excludes training rows whose resolution date ≥ this row's T₀.
+
+    `label_resolution_date == petition_filing_date` here — the gate
+    should match the pre-resolution-date semantics (strict <) when the
+    two coincide. The next test covers the divergent case.
+    """
+    pf_dates = pd.to_datetime(
+        ["2020-01-01", "2020-06-01", "2021-01-01", "2020-06-01", "2021-06-01"]
+    )
     train = pd.DataFrame(
         {
             "petitioner_real_party": ["A", "A", "A", "B", "B"],
-            "petition_filing_date": pd.to_datetime(
-                ["2020-01-01", "2020-06-01", "2021-01-01", "2020-06-01", "2021-06-01"]
-            ),
+            "petition_filing_date": pf_dates,
+            "label_resolution_date": pf_dates,
         }
     )
     y_train = pd.Series([1, 0, 1, 0, 1])
@@ -138,8 +154,8 @@ def test_prior_encoder_strict_t0_filter_and_count():
         {
             "petitioner_real_party": ["A", "A", "B", "C"],
             # row 0: same T₀ as a train row → strict < excludes it (count=0 → fallback)
-            # row 1: only train rows with T₀ < this date count
-            # row 2: B has 1 prior at 2020-06-01 (cancelled=0) → rate 0, count 1
+            # row 1: only train rows with resolution_date < this date count
+            # row 2: B has 1 prior resolved at 2020-06-01 (cancelled=0) → rate 0, count 1
             # row 3: unseen petitioner → fallback
             "petition_filing_date": pd.to_datetime(
                 ["2020-01-01", "2020-12-01", "2021-01-01", "2021-06-01"]
@@ -180,11 +196,13 @@ def test_prior_encoder_strict_t0_filter_and_count():
 
 def test_prior_encoder_composite_key():
     """Tuple group keys (e.g. petitioner-owner pair) match exact tuple, not either column."""
+    pf = pd.to_datetime(["2020-01-01", "2020-02-01", "2020-03-01"])
     train = pd.DataFrame(
         {
             "petitioner_real_party": ["A", "A", "B"],
             "owner_real_party":      ["X", "Y", "X"],
-            "petition_filing_date":  pd.to_datetime(["2020-01-01", "2020-02-01", "2020-03-01"]),
+            "petition_filing_date":  pf,
+            "label_resolution_date": pf,
         }
     )
     y_train = pd.Series([1, 0, 0])
@@ -204,3 +222,83 @@ def test_prior_encoder_composite_key():
 
     assert out[0, 1] == 1 and out[0, 0] == pytest.approx(1.0)
     assert out[1, 1] == 1 and out[1, 0] == pytest.approx(0.0)
+
+
+def test_prior_encoder_gates_on_resolution_date_not_petition_date():
+    """Train rows whose label crystallized after a row's T₀ are excluded.
+
+    The leakage case `prediction_scope.md` §4 calls out: a training
+    petition filed before T₀ whose FWD issued *after* T₀ has a label
+    that wasn't observable at T₀. The old buggy behavior (ordering by
+    petition_filing_date) would still include such a row in the rolling
+    rate. The fix (ordering by label_resolution_date) excludes it.
+
+    Construction:
+      - Train row 0: A / petition 2019-01-01 / FWD 2021-06-01 (cancelled=1)
+      - Train row 1: A / petition 2020-01-01 / FWD 2020-06-01 (cancelled=0)
+      - Test row:    A / T₀ 2021-01-01
+
+    Both train rows pre-date the test T₀ on petition_filing_date, so
+    the buggy behavior would yield rate=0.5, count=2. Only row 1's
+    label was actually observable by 2021-01-01 (FWD 2020-06-01), so
+    the correct behavior is rate=0.0, count=1.
+    """
+    train = pd.DataFrame(
+        {
+            "petitioner_real_party": ["A", "A"],
+            "petition_filing_date": pd.to_datetime(["2019-01-01", "2020-01-01"]),
+            "label_resolution_date": pd.to_datetime(["2021-06-01", "2020-06-01"]),
+        }
+    )
+    y_train = pd.Series([1, 0])
+    test = pd.DataFrame(
+        {
+            "petitioner_real_party": ["A"],
+            "petition_filing_date": pd.to_datetime(["2021-01-01"]),
+        }
+    )
+
+    enc = PriorEncoder(group_columns=["petitioner_real_party"]).fit(train, y=y_train)
+    out = enc.transform(test)
+
+    assert out[0, 1] == 1, "only the train row whose FWD issued before T₀ should count"
+    assert out[0, 0] == pytest.approx(0.0), (
+        "rolling rate must reflect only observable labels (the cancelled=1 trial "
+        "is filtered out because its FWD post-dates T₀)"
+    )
+
+
+def test_prior_encoder_drops_rows_with_missing_resolution_date():
+    """Train rows with NaT resolution date are dropped — can't be gated safely.
+
+    A trial with no FWD-issue and no termination date can't be placed
+    on the time axis. Rather than fall back to petition_filing_date
+    (which would re-introduce the leakage we're avoiding), `fit` drops
+    these rows from the index entirely.
+    """
+    train = pd.DataFrame(
+        {
+            "petitioner_real_party": ["A", "A", "A"],
+            "petition_filing_date": pd.to_datetime(
+                ["2019-01-01", "2019-06-01", "2020-01-01"]
+            ),
+            "label_resolution_date": pd.to_datetime(
+                ["2020-06-01", None, "2020-12-01"]
+            ),
+        }
+    )
+    y_train = pd.Series([1, 1, 0])
+    test = pd.DataFrame(
+        {
+            "petitioner_real_party": ["A"],
+            "petition_filing_date": pd.to_datetime(["2021-01-01"]),
+        }
+    )
+
+    enc = PriorEncoder(group_columns=["petitioner_real_party"]).fit(train, y=y_train)
+    out = enc.transform(test)
+
+    # The middle row (NaT) is dropped. Surviving train rows are
+    # {2020-06-01: cancelled=1, 2020-12-01: cancelled=0}, both before T₀.
+    assert out[0, 1] == 2
+    assert out[0, 0] == pytest.approx(0.5)

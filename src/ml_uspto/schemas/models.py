@@ -170,6 +170,18 @@ class Prediction(BaseModel):
     feature_snapshot_id: str | None = None
 
 
+class CalibrationBin(BaseModel):
+    """One row of the held-out reliability curve."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    bin_lower: float
+    bin_upper: float
+    mean_predicted: float
+    fraction_positive: float
+    n_samples: int
+
+
 class ModelMetrics(BaseModel):
     """Evaluation metrics for a single trained model on a held-out split."""
 
@@ -179,6 +191,12 @@ class ModelMetrics(BaseModel):
     accuracy: float
     roc_auc: float
     classification_report: dict[str, Any]
+    # Calibration probes the gap between predicted and observed
+    # cancellation rates — RandomForest's `predict_proba` is known to be
+    # miscalibrated, so we measure but do not correct (decision-support
+    # use case only).
+    brier_score: float | None = None
+    calibration_bins: list[CalibrationBin] | None = None
 
 
 # ---------------------------------------------------------------------------

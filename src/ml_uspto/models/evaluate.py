@@ -10,6 +10,7 @@ import seaborn as sns
 from sklearn.base import BaseEstimator
 from sklearn.metrics import (
     accuracy_score,
+    brier_score_loss,
     classification_report,
     confusion_matrix,
     roc_auc_score,
@@ -19,7 +20,7 @@ from sklearn.model_selection import cross_validate
 from sklearn.pipeline import Pipeline
 
 from ml_uspto.clients.storage import LocalStorage, S3Storage
-from ml_uspto.schemas.models import ModelMetrics
+from ml_uspto.schemas.models import CalibrationBin, ModelMetrics
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +148,36 @@ def time_split(
     )
 
 
+def _calibration_bins(
+    y_true: pd.Series, y_prob: np.ndarray, n_bins: int = 10
+) -> list[CalibrationBin]:
+    """Reliability-curve rows on uniform [0,1] bins, empty bins skipped.
+
+    Per-bin counts are sklearn's `calibration_curve` output plus a
+    histogram, since we want `n_samples` to weight reliability points
+    when plotting (a bin holding 5 trials says little about miscalibration).
+    """
+    edges = np.linspace(0.0, 1.0, n_bins + 1)
+    idx = np.clip(np.digitize(y_prob, edges) - 1, 0, n_bins - 1)
+    y_arr = np.asarray(y_true)
+    bins: list[CalibrationBin] = []
+    for b in range(n_bins):
+        mask = idx == b
+        n = int(mask.sum())
+        if n == 0:
+            continue
+        bins.append(
+            CalibrationBin(
+                bin_lower=float(edges[b]),
+                bin_upper=float(edges[b + 1]),
+                mean_predicted=float(y_prob[mask].mean()),
+                fraction_positive=float(y_arr[mask].mean()),
+                n_samples=n,
+            )
+        )
+    return bins
+
+
 def evaluate_model(
     model: BaseEstimator, X_test: pd.DataFrame, y_test: pd.Series, model_name: str
 ) -> ModelMetrics:
@@ -159,13 +190,16 @@ def evaluate_model(
         accuracy=accuracy_score(y_test, y_pred),
         roc_auc=roc_auc_score(y_test, y_prob),
         classification_report=classification_report(y_test, y_pred, output_dict=True),
+        brier_score=float(brier_score_loss(y_test, y_prob)),
+        calibration_bins=_calibration_bins(y_test, y_prob),
     )
 
     logger.info(
-        "%s — Accuracy: %.4f, AUC: %.4f",
+        "%s — Accuracy: %.4f, AUC: %.4f, Brier: %.4f",
         metrics.model_name,
         metrics.accuracy,
         metrics.roc_auc,
+        metrics.brier_score,
     )
     return metrics
 

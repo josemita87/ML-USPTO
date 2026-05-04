@@ -53,16 +53,17 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--mature-days",
         type=int,
-        default=540,
+        default=600,
         help=(
             "Drop rows whose label hasn't had time to crystallize: "
             "`today - petition_filing_date < mature_days` are excluded "
-            "from BOTH train and held-out. Default 540 (~18 months — "
-            "typical FWD time-to-decision). Set to 0 to disable. "
-            "Without this filter the held-out tail is dominated by "
-            "fast-resolution trials (settlements, institution denials, "
-            "discretionary denials), all labeled cancelled=0, which "
-            "inflates AUC artificially."
+            "from BOTH train and held-out. Default 600 — empirical "
+            "median time-to-FWD on this cohort is 592 days, so 600 "
+            "sits past the peak of the FWD bell, not in the middle of "
+            "it. Set to 0 to disable. Without this filter the held-out "
+            "tail is dominated by fast-resolution trials (settlements, "
+            "institution denials, discretionary denials), all labeled "
+            "cancelled=0, which inflates AUC artificially."
         ),
     )
     parser.add_argument(
@@ -93,11 +94,31 @@ def main() -> None:
     # `patent_number` is also pulled in here — it's used solely as the
     # group key for the per-patent prior in `PriorEncoder` and is dropped
     # by `remainder="drop"` from every other branch.
+    #
+    # `label_resolution_date` is the date the trial's label crystallized:
+    # FWD-issue date for FWD-resolved trials, otherwise the termination
+    # date. `PriorEncoder` orders its rolling-rate cumsum by *this* date
+    # — not by petition_filing_date — so a training trial contributes to
+    # a row's prior only after its label was actually observable, per
+    # `prediction_scope.md` §4.
     label_cols = joined[
-        ["trial_number", "cancelled", "petition_filing_date", "patent_number"]
+        [
+            "trial_number",
+            "cancelled",
+            "petition_filing_date",
+            "patent_number",
+            "decision_issue_date",
+            "termination_date",
+        ]
     ].copy()
     label_cols["trial_number"] = label_cols["trial_number"].astype(str)
     label_cols["patent_number"] = label_cols["patent_number"].astype(str)
+    label_cols["label_resolution_date"] = pd.to_datetime(
+        label_cols["decision_issue_date"], errors="coerce"
+    ).combine_first(
+        pd.to_datetime(label_cols["termination_date"], errors="coerce")
+    )
+    label_cols = label_cols.drop(columns=["decision_issue_date", "termination_date"])
     features["trial_number"] = features["trial_number"].astype(str)
     merged = features.merge(label_cols, on="trial_number", how="inner")
 

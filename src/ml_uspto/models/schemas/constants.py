@@ -3,7 +3,7 @@
 from collections.abc import Callable
 from typing import Any
 
-from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier
 
 from ml_uspto.models.schemas.enums import ModelName
 
@@ -25,16 +25,6 @@ MODELS: dict[ModelName, Callable[[], Any]] = {
         class_weight="balanced",
         random_state=42,
         n_jobs=-1,
-    ),
-    # Sklearn's LightGBM-equivalent. On the current cohort it picks up
-    # ~1.4 ROC-AUC points over RF on the held-out tail, which matches the
-    # univariate diagnostic (no feature exceeds AUC 0.55, so the win comes
-    # from additive accumulation across many weak signals — exactly what
-    # gradient boosting is for and where bagged trees plateau). Defaults
-    # beat hand-tuned variants because the dataset has too little signal
-    # to support stronger regularization without underfitting.
-    ModelName.HIST_GRADIENT_BOOSTING: lambda: HistGradientBoostingClassifier(
-        random_state=42,
     ),
 }
 
@@ -60,10 +50,19 @@ PRIOR_GROUP_COLUMNS: tuple[tuple[str, ...], ...] = (
 )
 PRIOR_DATE_COLUMN: str = "petition_filing_date"
 
+# Per `prediction_scope.md` §4: priors must aggregate only over training
+# trials whose label was *observable* before this row's T₀ — i.e. their
+# terminating-FWD (or non-FWD termination) date strictly precedes T₀.
+# `label_resolution_date` is computed in `run_train.py` as
+# `decision_issue_date.combine_first(termination_date)` and indexes the
+# rolling cumsum inside `PriorEncoder` instead of `petition_filing_date`.
+PRIOR_RESOLUTION_DATE_COLUMN: str = "label_resolution_date"
+
 
 __all__ = [
     "MODELS",
     "MISSING_CATEGORY_SENTINEL",
     "PRIOR_GROUP_COLUMNS",
     "PRIOR_DATE_COLUMN",
+    "PRIOR_RESOLUTION_DATE_COLUMN",
 ]

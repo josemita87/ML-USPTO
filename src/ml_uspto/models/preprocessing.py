@@ -18,6 +18,7 @@ from ml_uspto.models.schemas.constants import (
     MISSING_CATEGORY_SENTINEL,
     PRIOR_DATE_COLUMN,
     PRIOR_GROUP_COLUMNS,
+    PRIOR_RESOLUTION_DATE_COLUMN,
 )
 
 
@@ -70,35 +71,47 @@ class PriorEncoder(BaseEstimator, TransformerMixin):
 
     For a row at T₀ with group key `g`, returns:
       - `<label>_prior_rate`: mean of `cancelled` over training rows
-        sharing group `g` with `petition_filing_date < T₀` (strict).
-        Falls back to the global rolling rate at T₀ when the group
-        has zero pre-T₀ history (unseen petitioner / first appearance
-        of a patent / etc.).
-      - `<label>_prior_count`: how many such pre-T₀ training rows
+        sharing group `g` whose **label-resolution date** (FWD-issue or
+        termination) is strictly before T₀. Falls back to the global
+        rolling rate (same gating) when the group has zero such history.
+      - `<label>_prior_count`: how many qualifying training rows
         exist. Tells the downstream model how reliable the rate is —
         a count of 0 means the rate is the global fallback, not a
         learned group-specific signal.
 
+    Why label-resolution date and not petition_filing_date.
+    Per `docs/scope/prediction_scope.md` §4, base rates that aggregate
+    over other trials' outcomes are admissible only over trials whose
+    **terminating decision** issued strictly before T₀. A trial whose
+    petition was filed before T₀ but whose FWD issued after T₀ has a
+    label that wasn't observable at T₀ — including it leaks future
+    information into the prior. So we order the cumulative sum by
+    `resolution_date_column` (= `decision_issue_date` for FWD-resolved
+    trials, else `termination_date`), not by petition_filing_date.
+
     Refit per CV fold: the rate at a fold's test rows is computed only
     from that fold's training portion (sklearn `cross_validate`
-    semantics). This is conservative vs deployment, where every prior
-    trial's outcome would be available at scoring time, but the
-    conservatism is harmless — it can only underestimate the deployed
-    model's quality.
+    semantics).
 
     Args:
         group_columns: One or more column names whose joined value is
             the group key. Length 1 → single-key prior (e.g. petitioner
             cancellation rate); length >1 → composite-key prior (e.g.
             petitioner-owner pair).
-        date_column: Name of the T₀ column on the input frame
-            (default `petition_filing_date`).
+        date_column: Name of the T₀ column (default `petition_filing_date`).
+            Used at transform time to query the rolling sum.
+        resolution_date_column: Name of the label-resolution-date column
+            on the *training* frame (default `label_resolution_date`).
+            Used at fit time to order the cumulative sum so a training
+            row contributes to a row's prior only after its label
+            actually crystallized.
     """
 
     def __init__(
         self,
         group_columns: list[str],
         date_column: str = "petition_filing_date",
+        resolution_date_column: str = "label_resolution_date",
     ) -> None:
         """Stash the column-name config; no state until `fit`.
 
@@ -108,23 +121,36 @@ class PriorEncoder(BaseEstimator, TransformerMixin):
         """
         self.group_columns = group_columns
         self.date_column = date_column
+        self.resolution_date_column = resolution_date_column
 
     def fit(self, X: pd.DataFrame, y: pd.Series | np.ndarray | None = None) -> "PriorEncoder":
-        """Index training (T₀, group, y) for cumulative-rate lookup.
+        """Index training (resolution_date, group, y) for cumulative-rate lookup.
 
-        Sorts training rows by T₀, then per group stores the sorted
-        T₀ array and the cumulative `y` sum aligned with it. Plus a
-        global rolling-sum index for the zero-count fallback.
+        Sorts training rows by `resolution_date_column`, drops rows with
+        unknown resolution date (rare; can't be gated), then per group
+        stores the sorted resolution-date array and the cumulative `y`
+        sum aligned with it. Plus a global rolling-sum index for the
+        zero-count fallback.
         """
         if y is None:
             raise ValueError("PriorEncoder requires y at fit time")
         X = self._as_frame(X)
         y_arr = np.asarray(y, dtype=np.float64)
-        dates = pd.to_datetime(X[self.date_column], errors="coerce").to_numpy()
+        res_dates = pd.to_datetime(
+            X[self.resolution_date_column], errors="coerce"
+        ).to_numpy()
         keys = self._build_keys(X)
 
-        order = np.argsort(dates, kind="stable")
-        dates_sorted = dates[order]
+        # A train row whose resolution date is unknown can't be gated
+        # against any T₀, so it can't contribute to the rolling rate
+        # without leaking. Drop these from the index entirely.
+        valid = ~pd.isna(res_dates)
+        res_dates = res_dates[valid]
+        keys = keys[valid]
+        y_arr = y_arr[valid]
+
+        order = np.argsort(res_dates, kind="stable")
+        dates_sorted = res_dates[order]
         keys_sorted = keys[order]
         y_sorted = y_arr[order]
 
@@ -152,9 +178,11 @@ class PriorEncoder(BaseEstimator, TransformerMixin):
         """Vectorized lookup: per-group binary search, then global fallback.
 
         Output shape `(n_rows, 2)` — column 0 is the rate, column 1
-        the count. Rows whose group has zero pre-T₀ history get
-        `count=0` and `rate` = global rolling cancellation rate at T₀
-        (or the corpus mean if T₀ predates every training row).
+        the count. The query date is the row's T₀; the per-group arrays
+        store training rows' label-resolution dates (set in `fit`), so a
+        training row contributes only when its label crystallized
+        strictly before the query T₀. Rows whose group has zero such
+        history get `count=0` and `rate` = global rolling rate at T₀.
         """
         X = self._as_frame(X)
         dates = pd.to_datetime(X[self.date_column], errors="coerce").to_numpy()
@@ -270,8 +298,12 @@ def build_preprocessor() -> ColumnTransformer:
     prior_branches = [
         (
             f"prior_{'_'.join(group)}",
-            PriorEncoder(group_columns=list(group), date_column=PRIOR_DATE_COLUMN),
-            [*group, PRIOR_DATE_COLUMN],
+            PriorEncoder(
+                group_columns=list(group),
+                date_column=PRIOR_DATE_COLUMN,
+                resolution_date_column=PRIOR_RESOLUTION_DATE_COLUMN,
+            ),
+            [*group, PRIOR_DATE_COLUMN, PRIOR_RESOLUTION_DATE_COLUMN],
         )
         for group in PRIOR_GROUP_COLUMNS
     ]

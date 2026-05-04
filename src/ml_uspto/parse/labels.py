@@ -87,7 +87,13 @@ def _identify_terminating_fwd(decisions: pd.DataFrame) -> pd.DataFrame:
         `document_title`, `document_identifier` — the fields the label
         cascade and text-blob lookup need.
     """
-    out_cols = ["trial_number", "terminating_outcome", "document_title", "document_identifier"]
+    out_cols = [
+        "trial_number",
+        "terminating_outcome",
+        "document_title",
+        "document_identifier",
+        "decision_issue_date",
+    ]
     empty = pd.DataFrame({c: [] for c in out_cols})
     if "document_type" not in decisions.columns or decisions.empty:
         return empty
@@ -124,7 +130,7 @@ def _identify_terminating_fwd(decisions: pd.DataFrame) -> pd.DataFrame:
     # tiebreak directly encodes "originality" rather than relying on the
     # filter being exhaustive.
     idx = fwds.groupby("trial_number")["decision_issue_date"].idxmin()
-    src_cols = ["trial_number", "trial_outcome"]
+    src_cols = ["trial_number", "trial_outcome", "decision_issue_date"]
     if "document_title" in fwds.columns:
         src_cols.append("document_title")
     if "document_identifier" in fwds.columns:

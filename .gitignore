@@ -37,3 +37,9 @@ SKILL.md
 # Runtime logs
 *.log
 logs/
+
+# Project deliverables / figures
+Final Project ML.pdf
+*.pptx
+*.ppt
+outline.md

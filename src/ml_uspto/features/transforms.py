@@ -30,24 +30,6 @@ from ml_uspto.features.schemas.constants import (
 logger = logging.getLogger(__name__)
 
 
-def _classify_inventor_geo(arr) -> str | None:
-    """Bucket `inventor_country_codes` array → {us_only, any_foreign} or None."""
-    if arr is None:
-        return None
-    if hasattr(arr, "__len__") and len(arr) == 0:
-        return None
-    return "us_only" if all(c == "US" for c in arr) else "any_foreign"
-
-
-def _count_cpc(arr) -> tuple[int, int]:
-    """Return (n_cpc_codes, n_cpc_subclasses) for the patent's CPC array."""
-    if arr is None or (hasattr(arr, "__len__") and len(arr) == 0):
-        return 0, 0
-    codes = [c for c in arr if isinstance(c, str) and c]
-    subclasses = {c[:4] for c in codes}
-    return len(codes), len(subclasses)
-
-
 def build_features(df: pd.DataFrame) -> pd.DataFrame:
     """Joined frame → leakage-free intermediate feature matrix.
 
@@ -79,10 +61,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     )
 
     # PTAB Director era at petition filing — left-closed/right-open
-    # intervals from `config/ptab_eras.yaml`. Riding through the OHE
-    # branch lets HGBT split on regime directly instead of having to
-    # rediscover (year, month) conjunctions like `year=2020 ∧ month≥5`
-    # that bracket the Fintiv designation. Stashed on `augmented` so
+    # intervals from `config/ptab_eras.yaml`. Stashed on `augmented` so
     # the OHE loop below picks it up like any other categorical.
     era_starts = pd.to_datetime([s for _, s in PTAB_ERAS]).to_numpy()
     era_names = np.array([n for n, _ in PTAB_ERAS], dtype=object)
@@ -94,13 +73,15 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
         era_names[era_idx_clipped],
     )
 
-    # Inventor-geography bucket — collapses the high-cardinality
-    # `inventor_country_codes` array into a 3-way OHE (us_only /
-    # any_foreign / NaN). NaN flows through to the OHE branch's
-    # MISSING_CATEGORY_SENTINEL and becomes its own one-hot level.
-    augmented["inventor_geo"] = augmented["inventor_country_codes"].map(
-        _classify_inventor_geo
-    )
+    # Collapse high-cardinality `inventor_country_codes` to a 3-way bucket
+    # {us_only, any_foreign, NaN}; NaN survives the OHE pass-through as its
+    # own level via MISSING_CATEGORY_SENTINEL downstream.
+    def _inventor_geo(arr):
+        if arr is None or (hasattr(arr, "__len__") and len(arr) == 0):
+            return None
+        return "us_only" if all(c == "US" for c in arr) else "any_foreign"
+
+    augmented["inventor_geo"] = augmented["inventor_country_codes"].map(_inventor_geo)
 
     # Paired `<col>_missing` set *before* imputation so the NaN signal survives.
     for col in PATENT_NULLABLE_NUMERIC:
@@ -117,12 +98,18 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     for col in PATENT_COUNT_FEATURES:
         features[col] = augmented[col].astype(int)
 
-    # Total CPC codes on the patent + distinct subclass count (first 4 chars,
-    # e.g. `H01Q`, `A61N`). Captures classification breadth — broad patents
-    # spanning many subclasses behave differently from narrow ones.
-    cpc_pairs = augmented["cpc_codes"].map(_count_cpc)
-    features["n_cpc_codes"] = [p[0] for p in cpc_pairs]
-    features["n_cpc_subclasses"] = [p[1] for p in cpc_pairs]
+    # Classification breadth: total CPC codes + distinct subclass count
+    # (first 4 chars, e.g. `H01Q`, `A61N`).
+    def _count_cpc(arr):
+        if arr is None or (hasattr(arr, "__len__") and len(arr) == 0):
+            return 0, 0
+        codes = [c for c in arr if isinstance(c, str) and c]
+        return len(codes), len({c[:4] for c in codes})
+
+    cpc_pairs = augmented["cpc_codes"].map(_count_cpc).tolist()
+    features["n_cpc_codes"], features["n_cpc_subclasses"] = (
+        zip(*cpc_pairs) if cpc_pairs else ([], [])
+    )
 
     # Raw pass-through; encoder is fit train-only by the modeling-side preprocessor.
     for col in (*OHE_CATEGORICAL_COLUMNS, *FREQUENCY_CATEGORICAL_COLUMNS):
@@ -130,11 +117,10 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
         features[col] = values.where(values.notna(), np.nan)
 
     text_features = pd.DataFrame(
-        list(augmented["petition_text"].map(aggregate_petition_text_row)),
+        augmented["petition_text"].map(aggregate_petition_text_row).tolist(),
         index=augmented.index,
     )
-    for col in PETITION_TEXT_FEATURE_KEYS:
-        features[col] = text_features[col]
+    features[list(PETITION_TEXT_FEATURE_KEYS)] = text_features[list(PETITION_TEXT_FEATURE_KEYS)]
 
     logger.info("Built %d features for %d samples", features.shape[1], features.shape[0])
     return features
