@@ -1,5 +1,6 @@
 """Application settings loaded from .env + config/settings.yaml via pydantic-settings."""
 
+from datetime import date
 from functools import lru_cache
 from pathlib import Path
 
@@ -72,6 +73,10 @@ class ModelSettings(BaseSettings):
     test_size: float = 0.2
     random_state: int = 42
     cv_folds: int = 5
+    # Frozen so re-running tomorrow produces the same train/test rows.
+    mature_days: int = 600
+    experiment_today: date = date(2026, 5, 5)
+    holdout_after: date = date(2023, 1, 21)
 
 
 class Settings(BaseSettings):

@@ -195,7 +195,6 @@ class ModelMetrics(BaseModel):
     # cancellation rates — RandomForest's `predict_proba` is known to be
     # miscalibrated, so we measure but do not correct (decision-support
     # use case only).
-    brier_score: float | None = None
     calibration_bins: list[CalibrationBin] | None = None
 
 
@@ -365,6 +364,31 @@ class PdfFetchManifestRow(BaseModel):
     error: str | None = None
 
 
+
+
+class GridSearchEntry(BaseModel):
+    """One (params → CV scores) row from a `grid_search_cv` sweep."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    model_name: str
+    params: dict[str, Any]
+    mean_roc_auc: float
+    std_roc_auc: float
+    fold_roc_auc: list[float]
+    mean_fit_time: float
+
+
+class GridSearchResult(BaseModel):
+    """All entries from a `grid_search_cv` sweep plus the best combo by mean ROC-AUC."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    model_name: str
+    n_splits: int
+    entries: list[GridSearchEntry]
+    best_params: dict[str, Any]
+    best_mean_roc_auc: float
 
 
 class FwdOutcomePattern(NamedTuple):

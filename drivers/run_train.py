@@ -37,11 +37,11 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--holdout-after",
-        required=True,
+        default=str(get_settings().model.holdout_after),
         help=(
             "Cutoff date (YYYY-MM-DD). Rows with petition_filing_date >= cutoff "
-            "form the deployment-honest held-out tail. Typically ~12–18 months "
-            "before the latest petition in the cohort."
+            "form the deployment-honest held-out tail. Default from settings.yaml "
+            "(model.holdout_after) — frozen for reproducibility."
         ),
     )
     parser.add_argument(
@@ -53,26 +53,21 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--mature-days",
         type=int,
-        default=600,
+        default=get_settings().model.mature_days,
         help=(
             "Drop rows whose label hasn't had time to crystallize: "
             "`today - petition_filing_date < mature_days` are excluded "
-            "from BOTH train and held-out. Default 600 — empirical "
-            "median time-to-FWD on this cohort is 592 days, so 600 "
-            "sits past the peak of the FWD bell, not in the middle of "
-            "it. Set to 0 to disable. Without this filter the held-out "
-            "tail is dominated by fast-resolution trials (settlements, "
-            "institution denials, discretionary denials), all labeled "
-            "cancelled=0, which inflates AUC artificially."
+            "from BOTH train and held-out. Default from settings.yaml "
+            "(model.mature_days). Set to 0 to disable."
         ),
     )
     parser.add_argument(
         "--today",
-        default=None,
+        default=str(get_settings().model.experiment_today),
         help=(
-            "Override 'today' for the mature-days computation "
-            "(YYYY-MM-DD). Default: system date. Set this for "
-            "reproducible runs."
+            "Pinned 'today' for the mature-days computation (YYYY-MM-DD). "
+            "Default from settings.yaml (model.experiment_today) — frozen "
+            "so reruns are reproducible."
         ),
     )
     return parser.parse_args()
@@ -129,7 +124,7 @@ def main() -> None:
     # denials, discretionary denials) all labeled cancelled=0. Applied
     # to BOTH train and held-out so the populations stay comparable.
     if args.mature_days > 0:
-        today = pd.Timestamp(args.today) if args.today else pd.Timestamp(pd.Timestamp.today().date())
+        today = pd.Timestamp(args.today)
         mature_cut = today - pd.Timedelta(days=args.mature_days)
         n_before = len(merged)
         merged = merged[pd.to_datetime(merged["petition_filing_date"]) <= mature_cut].copy()

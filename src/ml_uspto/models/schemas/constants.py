@@ -4,6 +4,9 @@ from collections.abc import Callable
 from typing import Any
 
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 
 from ml_uspto.models.schemas.enums import ModelName
 
@@ -26,6 +29,40 @@ MODELS: dict[ModelName, Callable[[], Any]] = {
         random_state=42,
         n_jobs=-1,
     ),
+    # Scaler is mandatory: post-preprocessor magnitudes mix prior counts,
+    # frequency encodings, and binary OHE — unscaled L2 follows the largest.
+    ModelName.LOGISTIC: lambda: Pipeline(
+        steps=[
+            ("scale", StandardScaler()),
+            (
+                "lr",
+                LogisticRegression(
+                    solver="saga",
+                    class_weight="balanced",
+                    max_iter=5000,
+                    random_state=42,
+                ),
+            ),
+        ]
+    ),
+}
+
+# Keys are sklearn `set_params` paths; LR uses `lr__` because its estimator is a Pipeline.
+MODEL_GRIDS: dict[ModelName, dict[str, list[Any]]] = {
+    # 24-combo grid spanning the winner (n_est=800, depth=20, max_feat=0.3,
+    # leaf=2) plus distinctly different alternatives on each axis: a shallower
+    # cap (depth=10), a much larger forest (1500), the sklearn-default
+    # max_features="sqrt", and a heavier leaf regularizer (5).
+    ModelName.RANDOM_FOREST: {
+        "n_estimators": [800, 1500],
+        "max_depth": [10, 20, None],
+        "max_features": [0.3, "sqrt"],
+        "min_samples_leaf": [2, 5],
+    },
+    ModelName.LOGISTIC: {
+        "lr__C": [0.01, 0.1, 1.0, 10.0],
+        "lr__l1_ratio": [0.0, 1.0],
+    },
 }
 
 # Sentinel inserted by `preprocessing.build_preprocessor`'s OHE branch
@@ -61,6 +98,7 @@ PRIOR_RESOLUTION_DATE_COLUMN: str = "label_resolution_date"
 
 __all__ = [
     "MODELS",
+    "MODEL_GRIDS",
     "MISSING_CATEGORY_SENTINEL",
     "PRIOR_GROUP_COLUMNS",
     "PRIOR_DATE_COLUMN",
