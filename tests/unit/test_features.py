@@ -19,7 +19,6 @@ from datetime import date
 import pandas as pd
 import pytest
 
-from ml_uspto.features.patent_aggregator import select_with_file_wrapper
 from ml_uspto.features.transforms import build_features
 
 
@@ -211,25 +210,6 @@ def test_no_recorded_assignment_regime_indicator():
     features = build_features(df)
     assert features["no_recorded_assignment"].iloc[0] == 1
     assert features["n_assignments"].iloc[0] == 0
-
-
-def test_select_with_file_wrapper_drops_unmatched_application_number():
-    """Trials with NaN application_number (joiner left-join miss) are dropped."""
-    df = pd.DataFrame(
-        {
-            "trial_number": ["IPR2024-00001", "IPR2024-00002"],
-            "application_number": ["14709428", None],
-        }
-    )
-    out = select_with_file_wrapper(df)
-    assert list(out["trial_number"]) == ["IPR2024-00001"]
-
-
-def test_select_with_file_wrapper_raises_when_column_missing():
-    """Missing `application_number` is a pipeline bug — patent features are mandatory."""
-    frame = pd.DataFrame({"trial_number": ["IPR2024-00001"]})
-    with pytest.raises(KeyError, match="application_number"):
-        select_with_file_wrapper(frame)
 
 
 def test_build_features_drops_no_wrapper_row_via_filter():

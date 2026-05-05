@@ -22,6 +22,8 @@ PATENT_COUNT_FEATURES: tuple[str, ...] = (
     "n_iss",
     "n_maint",
     "n_other",
+    "n_cpc_codes",
+    "n_cpc_subclasses",
 )
 
 # Patent features whose NaN ≠ 0 — each gets a paired `<name>_missing`

@@ -1,15 +1,11 @@
-"""Tests for the Tier A petition-text regex aggregator + the upstream usability filter."""
+"""Tests for the Tier A petition-text regex aggregator."""
 
 from __future__ import annotations
 
-import numpy as np
-import pandas as pd
 import pytest
 
-from ml_uspto.features.schemas.constants import MIN_PETITION_TEXT_CHARS
-from ml_uspto.features.petition_text import (
+from ml_uspto.features.transforms import (
     aggregate_petition_text_row as extract_petition_text_features,
-    select_usable_rows,
 )
 
 
@@ -117,57 +113,3 @@ def test_ipr2022_01002_regression():
     assert feat["mentions_fintiv_factors"] == 1
 
 
-# ---------------------------------------------------------------------------
-# select_usable_rows — upstream filter that gates the aggregator
-# ---------------------------------------------------------------------------
-
-
-def _frame_with_texts(texts: list[object]) -> pd.DataFrame:
-    return pd.DataFrame(
-        {
-            "trial_number": [f"IPR2024-{i:05d}" for i in range(len(texts))],
-            "petition_text": texts,
-        }
-    )
-
-
-def testselect_usable_rows_drops_nan_and_blank_sentinel():
-    """NaN cache misses and the ingest driver's literal 'BLANK' sentinel both drop."""
-    frame = _frame_with_texts([np.nan, "BLANK", "x" * MIN_PETITION_TEXT_CHARS])
-    out = select_usable_rows(frame)
-    assert list(out["trial_number"]) == ["IPR2024-00002"]
-
-
-def testselect_usable_rows_drops_whitespace_only_short_text():
-    """All-whitespace pdfplumber output is below the threshold and drops."""
-    frame = _frame_with_texts(["\n" * 100, "x" * MIN_PETITION_TEXT_CHARS])
-    out = select_usable_rows(frame)
-    assert len(out) == 1
-
-
-def testselect_usable_rows_keeps_text_at_threshold():
-    """Text whose length equals the threshold is the inclusion boundary."""
-    frame = _frame_with_texts(
-        [
-            "x" * (MIN_PETITION_TEXT_CHARS - 1),
-            "x" * MIN_PETITION_TEXT_CHARS,
-            "x" * (MIN_PETITION_TEXT_CHARS + 1),
-        ]
-    )
-    out = select_usable_rows(frame)
-    assert list(out["trial_number"]) == ["IPR2024-00001", "IPR2024-00002"]
-
-
-def testselect_usable_rows_raises_when_column_missing():
-    """Missing `petition_text` column is a pipeline bug — Tier A is mandatory."""
-    frame = pd.DataFrame({"trial_number": ["IPR2024-00001"]})
-    with pytest.raises(KeyError, match="petition_text"):
-        select_usable_rows(frame)
-
-
-def testselect_usable_rows_returns_copy():
-    """Mutating the returned frame must not write back through to the input."""
-    frame = _frame_with_texts(["x" * MIN_PETITION_TEXT_CHARS])
-    out = select_usable_rows(frame)
-    out.iloc[0, out.columns.get_loc("petition_text")] = "mutated"
-    assert frame.iloc[0]["petition_text"] != "mutated"

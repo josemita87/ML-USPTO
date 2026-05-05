@@ -19,3 +19,10 @@ class EventCategory(StrEnum):
 NON_TRIAL_CATEGORIES: tuple[EventCategory, ...] = tuple(
     cat for cat in EventCategory if cat is not EventCategory.TRIAL
 )
+
+
+class InventorGeo(StrEnum):
+    """3-way bucket over `inventor_country_codes` (NaN survives as its own OHE level)."""
+
+    US_ONLY = "us_only"
+    ANY_FOREIGN = "any_foreign"

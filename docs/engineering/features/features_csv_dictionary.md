@@ -45,8 +45,10 @@ Derived from `petition_filing_date` (the trial's T₀). `filing_dayofweek`
 was dropped (no plausible IPR mechanism) and `presidential_regime` was
 dropped as a low-resolution era proxy with bucket boundaries (Jan-20
 inaugurations) misaligned with the actual policy-event dates that
-matter (Fintiv May 2020, Vidal memo June 2022). Era control is carried
-by `filing_year`; `filing_month` captures intra-year seasonality.
+matter (Fintiv May 2020, Vidal memo June 2022). High-resolution era
+control is now carried by the `ptab_era` categorical (§6), keyed on the
+Director-tenure / Director-memo windows from `config/ptab_eras.yaml`;
+`filing_month` captures intra-year seasonality.
 
 | Column | Type | Meaning |
 |---|---|---|
@@ -86,14 +88,15 @@ semantics". Row-local, set in `build_features`.
 
 The companion "no file wrapper at all" indicator (`patent_features_missing`) was dropped on 2026-05-03 after the corpus check confirmed every joined trial has a wrapper — the indicator was vacuous in v1.
 
-## 5. Patent-event count features (10)
+## 5. Patent-event count features (13)
 
 Counts of file-wrapper events (`eventDataBag`) with `eventDate ≤ T₀`,
 bucketed by the event-code taxonomy in `config/patents/event_codes.yaml`
 (see `EventCategory` enum). The `TRIAL` category is banned (it would
-leak the IPR outcome) and not exposed as a feature. NaN ⇒ no wrapper,
-which is row-local missingness — these counts safely 0-fill in
-`build_features`.
+leak the IPR outcome) and not exposed as a feature. Trials with no
+matched file wrapper are dropped from the feature matrix entirely by
+`build_features` rather than 0-filled — a 0-filled row would
+masquerade as a real "patent had zero events" measurement.
 
 | Column | Bucket | Meaning |
 |---|---|---|
@@ -108,20 +111,25 @@ which is row-local missingness — these counts safely 0-fill in
 | `n_assignments` | — | Pre-T₀ entries in `assignmentBag`. |
 | `n_distinct_assignees` | — | Distinct (normalized) assignee strings across pre-T₀ assignments. |
 | `n_parent_applications` | — | Length of `parentApplicationBag` (continuity chain depth). |
+| `n_cpc_codes` | — | Total CPC codes assigned to the patent (proxy for technical breadth). |
+| `n_cpc_subclasses` | — | Distinct CPC subclasses (first 4 characters, e.g. `H04L`) — coarser than `n_cpc_codes`, captures multi-domain patents. |
 
-## 6. Raw categoricals (4)
+## 6. Raw categoricals (7)
 
 Pass-through string columns. The modeling-side preprocessor encodes
 them per fold; do not encode them yourself before splitting.
 
 | Column | Encoding strategy (downstream) | Notes |
 |---|---|---|
-| `technology_center` | `OneHotEncoder(handle_unknown="ignore")` | Closed taxonomy of 17 USPTO TC codes. Missing → constant-fill sentinel before OHE so it becomes its own category. |
+| `technology_center` | `OneHotEncoder(handle_unknown="ignore")` | Closed taxonomy of ~18 USPTO TC codes. Missing → constant-fill sentinel before OHE so it becomes its own category. |
 | `cpc_section` | `OneHotEncoder(handle_unknown="ignore")` | First letter of the patent's first CPC code (A/B/C/D/E/F/G/H/Y). Missing → sentinel category. |
-| `petitioner_real_party` | `FrequencyEncoder` | Open-vocabulary string. ~3,500 distinct values in the current corpus; long tail. |
+| `ptab_era` | `OneHotEncoder(handle_unknown="ignore")` | PTAB Director / memo era at petition filing — left-closed/right-open intervals from `config/ptab_eras.yaml` (Iancu, Vidal pre-memo, Vidal post-memo, …). Set in `build_features` via `np.searchsorted`; pre-PTAB or NaN filing dates → None → sentinel category. |
+| `entity_size` | `OneHotEncoder(handle_unknown="ignore")` | USPTO entity-size on the patent record: {Regular Undiscounted, Small, Micro, NaN}. Small entities show ~5pp higher cancel rate. |
+| `inventor_geo` | `OneHotEncoder(handle_unknown="ignore")` | Derived in `_aggregate_patent_row` from `inventor_country_codes` and bucketed to {`us_only`, `any_foreign`, NaN}. NaN when no inventor country codes are recorded. |
+| `petitioner_real_party` | `FrequencyEncoder` | Open-vocabulary string. ~3,950 distinct values in the current corpus; long tail. |
 | `owner_real_party` | `FrequencyEncoder` | Open-vocabulary string. ~3,900 distinct values. NaN (~0.5%) maps to count 0 at transform time. |
 
-## 7. Tier A petition-text features (5)
+## 7. Tier A petition-text features (6)
 
 Row-local regex extractions over the pdfplumber-extracted petition body
 text (joined onto the trial frame from `Frame.PETITION_TEXTS`). Pattern
@@ -136,6 +144,7 @@ ground-truth cohort).
 | `n_grounds_103` | int | Count of §103 (obviousness) statute citations. Modal IPR challenge type. |
 | `has_sotera_stipulation` | int (0/1) | 1 if the petition contains a Sotera-style stipulation ("will not pursue / cease asserting … invalidity / grounds" in parallel district-court litigation). Essentially impossible pre-2021 (Sotera Wireless precedential Dec 2020). |
 | `mentions_fintiv_factors` | int (0/1) | 1 if ≥3 distinct Fintiv-factor indices (1–6) appear via any of seven phrasing patterns (keyword-anchored, colon/period-headed, ordinal narrative, line-anchored bare digit, etc.). Captures whether the petitioner pre-emptively addresses §314(a) discretionary-denial risk. |
+| `petition_text_length` | int | Character length of the extracted petition body. Effort proxy; floored at `MIN_PETITION_TEXT_CHARS` by the row-drop filter, so the observed range on the cohort is ~5K–860K characters. |
 
 ### Drop policy: trials with unusable petition text
 

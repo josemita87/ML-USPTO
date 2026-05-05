@@ -53,7 +53,7 @@ from pathlib import Path
 
 import pytest
 
-from ml_uspto.features.petition_text import (
+from ml_uspto.features.transforms import (
     aggregate_petition_text_row as extract_features,
 )
 from ml_uspto.ingest.schemas.enums import Stage
