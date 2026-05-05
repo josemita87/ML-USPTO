@@ -25,5 +25,9 @@ model:
   cv_folds: 5
   mature_days: 600
   experiment_today: "2026-05-05"
-  # 600-day held-out window: experiment_today - mature_days - 600 = 2023-01-21.
-  holdout_after: "2023-01-21"
+  # Frozen at the value used to produce final_submission/report.pdf so that
+  # `drivers/run_train.py` reruns reproduce the reported held-out tail (1,907
+  # rows, 433 positives). Earlier runs derived this from
+  # `experiment_today - mature_days - 600`; the report pinned it explicitly
+  # at 2023-01-01 for reproducibility.
+  holdout_after: "2023-01-01"

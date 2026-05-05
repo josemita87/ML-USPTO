@@ -14,12 +14,18 @@ MODELS: dict[ModelName, Callable[[], Any]] = {
     # Sweep on the enriched feature matrix (entity_size, inventor_geo,
     # petition_text_length, n_cpc_codes, n_cpc_subclasses) picked these
     # knobs as the held-out winner (HO AUC 0.6234 on the 2023+ tail,
-    # mature_days=540). Notable: `max_depth=10` cap underfits badly
-    # (HO 0.575); removing it is the single biggest lever. `max_features=0.3`
-    # lets each split see ~25 of the ~85 post-preprocessing columns —
-    # `sqrt` is too restrictive for this signal-poor matrix where many
-    # weak features need to compose. `min_samples_leaf=5` damps the
-    # variance-floor RF would otherwise hit on rare counsel/party priors.
+    # mature_days=540) at n_estimators=800. A follow-up trim to 500 trees
+    # came in at the same held-out AUC within fold-level noise (±0.034
+    # 5-fold std) for ~40% lower fit cost and is what shipped in
+    # final_submission/report.pdf; the original grid in `MODEL_GRIDS`
+    # below still spans 800/1500 since 500 was the result of a post-grid
+    # ablation rather than a grid-search winner. Notable: `max_depth=10`
+    # cap underfits badly (HO 0.575); removing it is the single biggest
+    # lever. `max_features=0.3` lets each split see ~25 of the ~85
+    # post-preprocessing columns — `sqrt` is too restrictive for this
+    # signal-poor matrix where many weak features need to compose.
+    # `min_samples_leaf=5` damps the variance-floor RF would otherwise
+    # hit on rare counsel/party priors.
     ModelName.RANDOM_FOREST: lambda: RandomForestClassifier(
         n_estimators=500,
         max_depth=None,
