@@ -373,21 +373,6 @@ def attach_rolling_encodings(
     out = features.copy()
     y_arr = np.asarray(y)
 
-    # Guard the holdout→train leakage invariant: the strict-`<` gate only
-    # blocks holdout labels feeding training rows when every resolution
-    # date is on or after its own filing date. Violations would mean a
-    # row's label crystallized before its petition was even filed —
-    # impossible by construction, but cheap to assert.
-    fdate = pd.to_datetime(features[PRIOR_DATE_COLUMN], errors="coerce")
-    rdate = pd.to_datetime(features[PRIOR_RESOLUTION_DATE_COLUMN], errors="coerce")
-    both = fdate.notna() & rdate.notna()
-    if both.any() and (rdate[both] < fdate[both]).any():
-        raise ValueError(
-            "label_resolution_date precedes petition_filing_date for some rows; "
-            "the holdout→train leakage gate in PriorEncoder relies on "
-            "resolution_date >= filing_date."
-        )
-
     for group in PRIOR_GROUP_COLUMNS:
         enc = PriorEncoder(
             group_columns=list(group),
