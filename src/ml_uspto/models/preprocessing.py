@@ -91,12 +91,15 @@ class FrequencyEncoder(BaseEstimator, TransformerMixin):
         nat_mask = pd.isna(q_dates)
         out = np.zeros((len(X), len(self.feature_names_in_)), dtype=np.int64)
 
+        # For each column to compute frequency
         for j, col in enumerate(self.feature_names_in_):
             per_val = self.group_dates_.get(col, {})
             col_vals = X[col].to_numpy()
             rows_by_val: dict[object, list[int]] = {}
             for i, v in enumerate(col_vals):
                 rows_by_val.setdefault(v, []).append(i)
+
+            # For each category within the column, find counts prior to t0 by searching the timesorted array per_val.get(v) with fancy indexing.
             for v, row_idxs in rows_by_val.items():
                 train_dates = per_val.get(v)
                 if train_dates is None:
@@ -337,28 +340,90 @@ class PriorEncoder(BaseEstimator, TransformerMixin):
         return pd.DataFrame(np.asarray(X))
 
 
-def build_preprocessor() -> ColumnTransformer:
-    """Build the train-fit-only preprocessor for the model-ready frame.
+def attach_rolling_encodings(
+    features: pd.DataFrame, y: pd.Series | np.ndarray
+) -> pd.DataFrame:
+    """Compute T₀-rolling categorical encodings once over the full corpus.
 
-    Four transformer kinds, all refit per CV fold:
-      - `PriorEncoder` per entry in `PRIOR_GROUP_COLUMNS` — leakage-safe
-        rolling cancellation rate + count for a group key (petitioner,
-        owner, pair, technology center, patent). Each requires
-        `petition_filing_date` to be present on the input frame.
-      - `FrequencyEncoder` for `FREQUENCY_CATEGORICAL_COLUMNS`
-        (open-vocabulary party identifiers). Counts learned on train,
-        unseen test categories map to 0.
-      - One-hot encoding for `OHE_CATEGORICAL_COLUMNS` (closed
-        taxonomies — TC, CPC section). Missing values are filled with
-        a constant sentinel *before* encoding so NaN becomes an
-        explicit "missing" level. The column set is frozen at fit time;
-        `handle_unknown="ignore"` maps unseen test categories to
-        all-zero rows.
-      - `SimpleImputer(strategy="median")` for any remaining numeric
-        columns. Median is a corpus aggregate, fit on train.
+    `FrequencyEncoder` and `PriorEncoder` are both row-local: each row's
+    output is a strict function of corpus rows whose date is strictly
+    before that row's T₀. That gating is leakage-free regardless of
+    which subset is used at fit, so refitting per CV fold (the previous
+    setup) only throws away data — a fold's val row could legitimately
+    use the corpus's full pre-T₀ history of every category, not just
+    that fold's training prefix. We compute these once over the merged
+    pre-modeling frame and attach them as plain numeric columns.
+
+    Holdout→train leakage is structurally impossible here: training rows
+    have T₀ < holdout cutoff ≤ every holdout row's `label_resolution_date`,
+    so the strict-`<` gate inside the encoders never lets a holdout
+    label feed a training row's encoding.
+
+    Args:
+        features: Full corpus frame, post label-merge. Must contain the
+            group columns, `PRIOR_DATE_COLUMN`,
+            `PRIOR_RESOLUTION_DATE_COLUMN`, and the
+            `FREQUENCY_CATEGORICAL_COLUMNS`.
+        y: Binary label aligned row-wise with `features`.
 
     Returns:
-        A `ColumnTransformer` ready to drop into a `Pipeline`.
+        A copy of `features` with `<group>_prior_rate`,
+        `<group>_prior_count`, and `<col>_frequency` columns appended.
+    """
+    out = features.copy()
+    y_arr = np.asarray(y)
+
+    # Guard the holdout→train leakage invariant: the strict-`<` gate only
+    # blocks holdout labels feeding training rows when every resolution
+    # date is on or after its own filing date. Violations would mean a
+    # row's label crystallized before its petition was even filed —
+    # impossible by construction, but cheap to assert.
+    fdate = pd.to_datetime(features[PRIOR_DATE_COLUMN], errors="coerce")
+    rdate = pd.to_datetime(features[PRIOR_RESOLUTION_DATE_COLUMN], errors="coerce")
+    both = fdate.notna() & rdate.notna()
+    if both.any() and (rdate[both] < fdate[both]).any():
+        raise ValueError(
+            "label_resolution_date precedes petition_filing_date for some rows; "
+            "the holdout→train leakage gate in PriorEncoder relies on "
+            "resolution_date >= filing_date."
+        )
+
+    for group in PRIOR_GROUP_COLUMNS:
+        enc = PriorEncoder(
+            group_columns=list(group),
+            date_column=PRIOR_DATE_COLUMN,
+            resolution_date_column=PRIOR_RESOLUTION_DATE_COLUMN,
+        ).fit(features, y=y_arr)
+        arr = enc.transform(features)
+        rate_name, count_name = enc.get_feature_names_out()
+        out[rate_name] = arr[:, 0]
+        out[count_name] = arr[:, 1]
+
+    freq_cols = [*FREQUENCY_CATEGORICAL_COLUMNS, PRIOR_DATE_COLUMN]
+    enc = FrequencyEncoder(date_column=PRIOR_DATE_COLUMN).fit(features[freq_cols])
+    arr = enc.transform(features[freq_cols])
+    for j, name in enumerate(enc.get_feature_names_out(freq_cols)):
+        out[name] = arr[:, j]
+    return out
+
+
+def build_preprocessor() -> ColumnTransformer:
+    """Build the per-fold preprocessor for the model-ready frame.
+
+    Categorical rolling encodings (`PriorEncoder`, `FrequencyEncoder`)
+    are computed once over the full corpus by `attach_rolling_encodings`
+    upstream — they are leakage-free by row-local T₀ gating, and
+    refitting per fold throws away pre-T₀ history without correctness
+    benefit. This stage handles only per-fold-fittable transforms:
+
+      - One-hot encoding for `OHE_CATEGORICAL_COLUMNS` (closed
+        taxonomies — TC, CPC section). Missing values fill with a
+        sentinel before encoding so NaN becomes an explicit "missing"
+        level; column set frozen at fit time; `handle_unknown="ignore"`
+        maps unseen test categories to all-zero rows.
+      - `SimpleImputer(strategy="median")` over the remaining numeric
+        columns (raw numeric features + the precomputed rolling
+        encodings). Median is fit on train only.
     """
     ohe_branch = Pipeline(
         steps=[
@@ -376,27 +441,8 @@ def build_preprocessor() -> ColumnTransformer:
         ]
     )
 
-    prior_branches = [
-        (
-            f"prior_{'_'.join(group)}",
-            PriorEncoder(
-                group_columns=list(group),
-                date_column=PRIOR_DATE_COLUMN,
-                resolution_date_column=PRIOR_RESOLUTION_DATE_COLUMN,
-            ),
-            [*group, PRIOR_DATE_COLUMN, PRIOR_RESOLUTION_DATE_COLUMN],
-        )
-        for group in PRIOR_GROUP_COLUMNS
-    ]
-
     return ColumnTransformer(
         transformers=[
-            *prior_branches,
-            (
-                "freq",
-                FrequencyEncoder(date_column=PRIOR_DATE_COLUMN),
-                [*FREQUENCY_CATEGORICAL_COLUMNS, PRIOR_DATE_COLUMN],
-            ),
             (
                 "ohe",
                 ohe_branch,
@@ -418,4 +464,4 @@ def build_pipeline(estimator: BaseEstimator) -> Pipeline:
     return Pipeline([("preprocess", build_preprocessor()), ("model", estimator)])
 
 
-__all__ = ["build_pipeline"]
+__all__ = ["attach_rolling_encodings", "build_pipeline"]

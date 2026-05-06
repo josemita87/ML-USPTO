@@ -6,8 +6,9 @@ chart that lives in `final_submission/figures/`. Reads
 `predictions_for_report.csv` / `metrics_for_report.json` for the values
 that are already persisted; refits because feature importances aren't.
 
-Charts 10–12 + report_* are owned by `figures/build_extra_charts.py` and
-`build_report_figures.py`; this script does not touch them.
+`report_*` charts (Figure 1 in `report.pdf`) are owned by
+`build_report_figures.py`; charts 10–12 + slide7_* are owned by
+`figures/build_slide7_charts.py`. This script does not touch those.
 """
 
 from __future__ import annotations
@@ -29,19 +30,24 @@ from sklearn.metrics import (
 
 from ml_uspto.clients.storage import get_storage
 from ml_uspto.models.evaluate import time_split
-from ml_uspto.models.preprocessing import build_pipeline
+from ml_uspto.models.preprocessing import attach_rolling_encodings, build_pipeline
 from ml_uspto.models.schemas.constants import MODELS
 from ml_uspto.models.schemas.enums import ModelName
 from ml_uspto.schemas.enums import Frame
+from ml_uspto.settings import get_settings
 
 ROOT = Path(__file__).resolve().parents[1]
 PRED_PATH = ROOT / "final_submission" / "predictions_for_report.csv"
 METRICS_PATH = ROOT / "final_submission" / "metrics_for_report.json"
 FIG_DIR = ROOT / "final_submission" / "figures"
 
-MATURE_DAYS = 600
-HOLDOUT_AFTER = "2023-01-01"
-TODAY = pd.Timestamp("2026-05-04")
+# Single source of truth for these knobs — `config/settings.yaml::model`.
+# Don't shadow with module-level constants; that's how the driver and the
+# notebook drift apart between report rebuilds.
+_MODEL = get_settings().model
+MATURE_DAYS = _MODEL.mature_days
+HOLDOUT_AFTER = _MODEL.holdout_after.isoformat()
+TODAY = pd.Timestamp(_MODEL.experiment_today)
 
 
 def _load_split_and_fit():
@@ -79,6 +85,11 @@ def _load_split_and_fit():
 
     y = merged["cancelled"].astype(int)
     petition_dates = merged["petition_filing_date"]
+    # Compute rolling categorical encodings over the full corpus before
+    # the train/holdout split — strict-< T₀ gating in the encoders makes
+    # this leakage-free and gives every row the richest possible pre-T₀
+    # history regardless of fold/holdout membership.
+    merged = attach_rolling_encodings(merged, y)
     X = merged.drop(columns=["trial_number", "cancelled"])
 
     X_train, X_test, y_train, y_test, _, _ = time_split(

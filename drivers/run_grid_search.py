@@ -20,6 +20,7 @@ from ml_uspto import paths
 from ml_uspto.clients.storage import get_storage
 from ml_uspto.models.evaluate import time_split
 from ml_uspto.models.plots import plot_grid_search_folds
+from ml_uspto.models.preprocessing import attach_rolling_encodings
 from ml_uspto.models.schemas.enums import ModelName
 from ml_uspto.models.tune import grid_search_cv
 from ml_uspto.schemas.enums import Frame
@@ -109,6 +110,7 @@ def main() -> None:
         )
 
     y = merged["cancelled"].astype(int)
+    merged = attach_rolling_encodings(merged, y)
     petition_dates = merged["petition_filing_date"]
     X = merged.drop(columns=["trial_number", "cancelled"])
 

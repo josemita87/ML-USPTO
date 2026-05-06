@@ -19,6 +19,7 @@ import pandas as pd
 
 from ml_uspto.clients.storage import get_storage
 from ml_uspto.models.evaluate import evaluate_model, save_metrics, time_split
+from ml_uspto.models.preprocessing import attach_rolling_encodings
 from ml_uspto.models.schemas.enums import ModelName
 from ml_uspto.models.train import train_and_evaluate_cv
 from ml_uspto.schemas.enums import Frame
@@ -135,11 +136,12 @@ def main() -> None:
         )
 
     y = merged["cancelled"].astype(int)
+    # Compute T₀-rolling prior + frequency encodings once over the full
+    # corpus (leakage-free by strict-`<` gating); the per-fold pipeline
+    # picks them up as plain numeric columns via the median-imputer
+    # branch's `make_column_selector(dtype_include=np.number)`.
+    merged = attach_rolling_encodings(merged, y)
     petition_dates = merged["petition_filing_date"]
-    # Keep `petition_filing_date` and `patent_number` in X so the
-    # `PriorEncoder` branches can read them; every other branch's
-    # column-selector ignores them, so `remainder="drop"` strips them
-    # from the final feature matrix.
     X = merged.drop(columns=["trial_number", "cancelled"])
 
     # Held-out tail is the deployment-honest evaluation slice — never seen
