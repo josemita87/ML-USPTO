@@ -76,7 +76,7 @@ class ModelSettings(BaseSettings):
     # Frozen so re-running tomorrow produces the same train/test rows.
     mature_days: int = 600
     experiment_today: date = date(2026, 5, 5)
-    holdout_after: date = date(2023, 1, 21)
+    holdout_after: date = date(2023, 1, 1)
 
 
 class Settings(BaseSettings):
