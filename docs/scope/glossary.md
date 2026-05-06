@@ -16,7 +16,7 @@ These three terms are often used interchangeably in casual conversation but sit 
 
 **Implication for the pipeline:**
 - Proceedings = rows and the source of the coarse target label (plus all static `trialMetaData` / party / patent fields ≤ T₀).
-- Decisions = label-only. The institution decision and FWD are post-T₀ and **excluded as feature sources** (`prediction_scope.md` §4). Current v1 reads FWD text only to resolve labels; petition-side Fintiv / 325(d) / Sotera extraction is deferred to the v2 petition-text pipeline — see §5 below.
+- Decisions = label-only. The institution decision and FWD are post-T₀ and **excluded as feature sources** (`prediction_scope.md` §4). Current v1 reads FWD text only to resolve labels. Petition-side Fintiv / 325(d) / Sotera signals **are shipped** as Tier A regex features (`mentions_fintiv_factors`, `has_sotera_stipulation`, `n_grounds_102/103`) over the petition PDF — see §5 below; richer Tier 1/2 petition-text work (declaration counts, RPI-list extraction, embeddings) remains deferred to v2.
 - Appeals = filter out; they are a different proceeding category entirely.
 
 ### CAFC appeals — label handling, not a filter
