@@ -37,10 +37,12 @@ def grid_search_cv(
     For each parameter combo in `grid` (defaulting to
     `MODEL_GRIDS[model_name]`), instantiates the estimator from
     `MODELS[model_name]()`, applies `set_params(**combo)`, wraps it with
-    `build_pipeline` so the leakage-aware preprocessor refits per fold,
-    and evaluates via `evaluate.time_series_cv`. Cannot use sklearn's
-    `GridSearchCV` because it would shuffle folds and break the
-    forward-walking date-safe split this codebase requires.
+    `build_pipeline` (whose fold-tier OHE + median imputer refit per
+    fold; corpus-tier rolling encodings are pre-attached upstream and
+    leakage-safe by row-local T₀ gating), and evaluates via
+    `evaluate.time_series_cv`. Cannot use sklearn's `GridSearchCV`
+    because it would shuffle folds and break the forward-walking
+    date-safe split this codebase requires.
 
     Selection metric is ROC-AUC mean across folds. Returns every combo's
     scores so the choice is auditable; `best_params` is the argmax row.

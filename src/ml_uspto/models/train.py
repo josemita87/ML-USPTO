@@ -27,10 +27,14 @@ def train_and_evaluate_cv(
     Calls `time_series_cv` for date-aware forward-walking folds (so
     same-day groups don't straddle the train/test cut), then refits the
     pipeline on `(X_train, y_train)` for held-out evaluation by the
-    caller. Wraps `MODELS[model_name]()` in `build_pipeline` so the
-    preprocessor (frequency encoder, one-hot encoder, median imputer)
-    is refit per fold — preventing the schema/value leakage a
-    corpus-wide encoding would introduce.
+    caller. Wraps `MODELS[model_name]()` in `build_pipeline`, whose
+    fold-tier preprocessor (OHE + median imputer) is refit per fold by
+    sklearn `cross_validate` — OHE column sets and imputation medians
+    are derived from training rows only. The corpus-tier rolling
+    encodings (`<group>_prior_rate`, `<group>_prior_count`,
+    `<col>_frequency`) are already on the frame; `attach_rolling_encodings`
+    upstream fits them once over the full corpus under a strict-`<` T₀
+    gate, so they don't refit per fold.
 
     The held-out tail (typically last 12–18 months) is split off
     upstream by `evaluate.time_split`; this function only sees rows
