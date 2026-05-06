@@ -1,4 +1,4 @@
-"""Modeling-side preprocessor: fit-on-train transforms applied per CV fold."""
+"""Preprocessing primitives: corpus-tier rolling encoders + per-fold ColumnTransformer."""
 
 from __future__ import annotations
 
@@ -34,22 +34,18 @@ class FrequencyEncoder(BaseEstimator, TransformerMixin):
 
     The date gate keeps the count consistent with project T₀
     discipline: a row dated 2017 cannot see a 2020 filing the same
-    party will eventually make. Refit per CV fold via sklearn
-    `cross_validate` semantics.
+    party will eventually make. Fit once over the full corpus by
+    `attach_rolling_encodings`; row-local strict-`<` gating makes that
+    leakage-free.
     """
 
     def __init__(self, date_column: str = "petition_filing_date") -> None:
-        """Stash the T₀-column name; no state until `fit`.
-
-        sklearn's `clone()` requires constructor args be retrievable as
-        same-named attributes.
-        """
+        # sklearn `clone()` requires constructor args be stored verbatim under the same name.
         self.date_column = date_column
 
     def fit(self, X: pd.DataFrame, y: object | None = None) -> "FrequencyEncoder":
         """Index per-(column, value) sorted train dates for rolling lookup."""
         X = self._as_frame(X)
-        # Pull t0 date out of the frame
         dates = pd.to_datetime(X[self.date_column], errors="coerce").to_numpy()
         valid = ~pd.isna(dates)
         dates = dates[valid]
@@ -61,17 +57,10 @@ class FrequencyEncoder(BaseEstimator, TransformerMixin):
 
         self.group_dates_: dict[str, dict[object, np.ndarray]] = {}
         for col in feature_cols:
-            # Apply the same valid-mask + date-sort permutation used on
-            # `dates`, so vals_sorted[i] is the column value of the row at
-            # dates_sorted[i] — walking it = walking train rows in
-            # chronological order.
             vals_sorted = X[col].to_numpy()[valid][order]
-            # Bucket positions by value. Python loop (not pandas groupby)
-            # because keys can be arbitrary objects (NaN, occasional
-            # tuples) that don't broadcast cleanly under numpy/pandas
-            # vectorization. Because we iterate in date order, each list
-            # comes out already date-sorted — exactly the precondition
-            # `np.searchsorted` needs at transform time.
+            # Python loop because keys can be arbitrary objects (NaN, tuples)
+            # that don't broadcast under groupby; iterating in date order means
+            # each per-value list is already sorted for `searchsorted`.
             idx_by_val: dict[object, list[int]] = {}
             for i, v in enumerate(vals_sorted):
                 idx_by_val.setdefault(v, []).append(i)
@@ -84,14 +73,11 @@ class FrequencyEncoder(BaseEstimator, TransformerMixin):
         """Per row: count of pre-T₀ train occurrences of its (col, value)."""
         X = self._as_frame(X)
         q_dates = pd.to_datetime(X[self.date_column], errors="coerce").to_numpy()
-        # NaT queries would otherwise sort as the max value under
-        # `searchsorted` and silently return the full training count
-        # — i.e. leak everything. Track the mask, force the search to
-        # return 0 for those rows by zeroing the output at the end.
+        # NaT sorts as max under searchsorted — would silently return the
+        # full training count. Mask now, zero out at the end.
         nat_mask = pd.isna(q_dates)
         out = np.zeros((len(X), len(self.feature_names_in_)), dtype=np.int64)
 
-        # For each column to compute frequency
         for j, col in enumerate(self.feature_names_in_):
             per_val = self.group_dates_.get(col, {})
             col_vals = X[col].to_numpy()
@@ -99,7 +85,6 @@ class FrequencyEncoder(BaseEstimator, TransformerMixin):
             for i, v in enumerate(col_vals):
                 rows_by_val.setdefault(v, []).append(i)
 
-            # For each category within the column, find counts prior to t0 by searching the timesorted array per_val.get(v) with fancy indexing.
             for v, row_idxs in rows_by_val.items():
                 train_dates = per_val.get(v)
                 if train_dates is None:
@@ -141,19 +126,14 @@ class PriorEncoder(BaseEstimator, TransformerMixin):
         a count of 0 means the rate is the global fallback, not a
         learned group-specific signal.
 
-    Why label-resolution date and not petition_filing_date.
-    Per `docs/scope/prediction_scope.md` §4, base rates that aggregate
-    over other trials' outcomes are admissible only over trials whose
-    **terminating decision** issued strictly before T₀. A trial whose
-    petition was filed before T₀ but whose FWD issued after T₀ has a
-    label that wasn't observable at T₀ — including it leaks future
-    information into the prior. So we order the cumulative sum by
-    `resolution_date_column` (= `decision_issue_date` for FWD-resolved
-    trials, else `termination_date`), not by petition_filing_date.
+    Why label-resolution date and not petition_filing_date: per
+    `docs/scope/prediction_scope.md` §4, a trial's outcome is observable
+    only after its FWD-issue (or termination) date, so gating on
+    petition_filing_date would let a label whose decision postdates T₀
+    feed the prior.
 
-    Refit per CV fold: the rate at a fold's test rows is computed only
-    from that fold's training portion (sklearn `cross_validate`
-    semantics).
+    Fit once over the full corpus by `attach_rolling_encodings`; the
+    strict-`<` gate on `resolution_date_column` makes that leakage-free.
 
     Args:
         group_columns: One or more column names whose joined value is
@@ -175,12 +155,7 @@ class PriorEncoder(BaseEstimator, TransformerMixin):
         date_column: str = "petition_filing_date",
         resolution_date_column: str = "label_resolution_date",
     ) -> None:
-        """Stash the column-name config; no state until `fit`.
-
-        sklearn's `clone()` requires constructor args be stored verbatim,
-        so we don't normalize here — `fit`/`transform` materialize a
-        list when they need one.
-        """
+        # sklearn `clone()` requires constructor args be stored verbatim under the same name.
         self.group_columns = group_columns
         self.date_column = date_column
         self.resolution_date_column = resolution_date_column
@@ -203,9 +178,7 @@ class PriorEncoder(BaseEstimator, TransformerMixin):
         ).to_numpy()
         keys = self._build_keys(X)
 
-        # A train row whose resolution date is unknown can't be gated
-        # against any T₀, so it can't contribute to the rolling rate
-        # without leaking. Drop these from the index entirely.
+        # Train rows with unknown resolution date can't be gated against any T₀; drop.
         valid = ~pd.isna(res_dates)
         res_dates = res_dates[valid]
         keys = keys[valid]
@@ -216,9 +189,7 @@ class PriorEncoder(BaseEstimator, TransformerMixin):
         keys_sorted = keys[order]
         y_sorted = y_arr[order]
 
-        # Bucket by key via Python loop — tuple keys (composite groups)
-        # break numpy `array == tuple` broadcasting, so we can't use a
-        # vectorized mask here.
+        # Python loop; tuple keys (composite groups) break `array == tuple` broadcasting.
         idx_by_key: dict[object, list[int]] = {}
         for i, k in enumerate(keys_sorted):
             idx_by_key.setdefault(k, []).append(i)
@@ -250,16 +221,13 @@ class PriorEncoder(BaseEstimator, TransformerMixin):
         dates = pd.to_datetime(X[self.date_column], errors="coerce").to_numpy()
         keys = self._build_keys(X)
 
-        # NaT queries would sort as max under `searchsorted` and silently
-        # pull in the full training history. Mask them out and assign the
-        # global unconditional fallback at the end (count stays 0).
+        # NaT sorts as max under searchsorted; mask now, override at end so it
+        # gets the unconditional global rate (count 0), not a full-history leak.
         nat_mask = pd.isna(dates)
 
         out_rate = np.full(len(X), np.nan, dtype=np.float64)
         out_count = np.zeros(len(X), dtype=np.int64)
 
-        # Group transform rows by their key in one Python pass — same
-        # tuple-vs-numpy issue as in fit.
         rows_by_key: dict[object, list[int]] = {}
         for i, k in enumerate(keys):
             rows_by_key.setdefault(k, []).append(i)
@@ -276,10 +244,9 @@ class PriorEncoder(BaseEstimator, TransformerMixin):
             out_rate[row_idxs_arr] = rate
             out_count[row_idxs_arr] = idx
 
-        # Global rolling fallback for rows whose group had no pre-T₀
-        # history (unseen group, or seen but every train occurrence is
-        # ≥ this row's T₀). The model should still see the cohort base
-        # rate at that point in time, not NaN.
+        # Cold-start fallback: unseen group or all train occurrences ≥ T₀.
+        # Use the global rolling rate at T₀ so the model sees the cohort base
+        # rate at that point in time rather than NaN.
         nan_mask = np.isnan(out_rate)
         if nan_mask.any():
             fb_idx = np.searchsorted(self.global_dates_, dates[nan_mask], side="left")
@@ -295,10 +262,6 @@ class PriorEncoder(BaseEstimator, TransformerMixin):
             )
             out_rate[nan_mask] = rate_fb
 
-        # Override anything `searchsorted` produced for NaT queries: a
-        # row with no T₀ can't be gated, so it gets the unconditional
-        # fallback rate and count 0 — never the leak-prone full-history
-        # tail searchsorted would have returned.
         if nat_mask.any():
             out_rate[nat_mask] = self.global_rate_
             out_count[nat_mask] = 0
@@ -319,19 +282,19 @@ class PriorEncoder(BaseEstimator, TransformerMixin):
         )
 
     def _build_keys(self, X: pd.DataFrame) -> np.ndarray:
-        """Concatenate the group columns into a single hashable key per row.
-
-        For composite keys, NaN components are coerced to a sentinel
-        string before tupling. Reason: tuple equality compares elements
-        via `==`, and `nan == nan` is False — two `(nan, "X")` tuples
-        built from different NaN objects can fail to hash/compare equal,
-        scattering rows that should bucket together. Sentinel-fill makes
-        NaN groups behave like any other named group.
+        """Concatenate group columns into one hashable key. NaN → sentinel so
+        `(nan, "X")` tuples bucket consistently (`nan == nan` is False).
         """
         cols = list(self.group_columns)
         if len(cols) == 1:
             return X[cols[0]].astype(object).to_numpy()
-        return X[cols].astype(object).fillna("__NA__").agg(tuple, axis=1).to_numpy()
+        return (
+            X[cols]
+            .astype(object)
+            .fillna(MISSING_CATEGORY_SENTINEL)
+            .agg(tuple, axis=1)
+            .to_numpy()
+        )
 
     @staticmethod
     def _as_frame(X: object) -> pd.DataFrame:
