@@ -149,7 +149,6 @@ The full per-feature catalog and tier-demotion history (three text features drop
   - [`docs/engineering/`](docs/engineering/) — *how it's built*: ingestion pipeline DAG, feature catalog, preprocessing
   - [`docs/deployment/`](docs/deployment/) — *production infra*: AWS foundation stack
   - [`docs/assessment/`](docs/assessment/) — Esade rubric mapping
-  - [`docs/presentation/`](docs/presentation/) — slide-deck source notes
 - [`src/ml_uspto/`](src/ml_uspto/) — package source: `clients/` (USPTO ODP, S3, local FS), `parse/` (raw JSON → typed records), `ingest/` (pagination + flatten), `features/` (T₀-leakage-safe transforms), `models/` (preprocessor, training, evaluation), `schemas/` (Pydantic models + enums + constants), `protocols/` (storage interface), `paths.py`, `settings.py`, `utils.py`.
 - [`drivers/`](drivers/) — entry-point scripts mirroring the notebook flow: `run_ingest_*.py`, `run_features.py`, `run_join.py`, `run_train.py`, `run_grid_search.py`.
 - [`config/`](config/) — runtime YAML: `settings.yaml`, `labels.yaml`, `petition_picker.yaml`, `parsers/patents.yaml`.

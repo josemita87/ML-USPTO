@@ -17,7 +17,7 @@ outcomes at the U.S. Patent Trial and Appeal Board.
 ## Running
 
 ```bash
-pip install pandas numpy scikit-learn matplotlib jupyter
+pip install -r requirements.txt
 jupyter notebook 01_getting_started.ipynb
 ```
 

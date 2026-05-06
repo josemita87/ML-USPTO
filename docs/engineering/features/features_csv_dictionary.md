@@ -12,24 +12,32 @@ and exported via `to_csv(index=False)`. The first column is
 `features.csv` is **not** the final feature matrix the model trains on.
 It is an intermediate frame where every column is a function of one
 row's own raw fields. Cross-row transforms — anything whose value or
-column-set depends on *other* rows in the corpus — are deliberately
-**deferred to the modeling-side preprocessor**
-(`ml_uspto.models.preprocessing.build_preprocessor`), which is fit on
-the training rows of each cross-validation fold.
+column-set depends on *other* rows in the corpus — live downstream in
+`ml_uspto.models.preprocessing`, split into two stages:
 
-The split prevents two distinct kinds of train/test contamination:
+1. **Corpus-level rolling encoders** (`attach_rolling_encodings`) — six
+   `PriorEncoder` rolling cancellation rates and two `FrequencyEncoder`
+   counts. Fitted once over the full corpus before the train/holdout
+   split; leakage-safe by strict-`<` T₀ gating inside the encoders, not
+   by per-fold refit (refitting throws away pre-T₀ history without
+   correctness benefit — see `../preprocessing.md` §1).
+2. **Per-fold preprocessor** (`build_preprocessor`) — `OneHotEncoder`
+   over closed-taxonomy categoricals plus `SimpleImputer(strategy=
+   "median")` over the remaining numerics. Refit on each CV fold's
+   training rows so OHE column sets and median values are train-only.
 
 | Concern | Where it would leak | Where it lives now |
 |---|---|---|
-| Frequency / target encoding | Encoded **value** is a corpus aggregate (`count(category)` mixed across train+test) | `FrequencyEncoder` step in the modeling pipeline |
-| One-hot encoding | Column-set decision is conditioned on test categories | `OneHotEncoder(handle_unknown="ignore")` step in the modeling pipeline |
-| Numeric median imputation | Imputed value is a corpus aggregate | `SimpleImputer(strategy="median")` step in the modeling pipeline |
+| Target / rolling priors | Encoded **value** is a corpus aggregate of *future* labels | `PriorEncoder` ×6 — corpus-level, strict-`<` T₀ gate on label-resolution date |
+| Open-vocabulary frequency encoding | Encoded **value** is a corpus aggregate (`count(category)` mixed across train+test) | `FrequencyEncoder` — corpus-level, strict-`<` T₀ gate on petition-filing date |
+| One-hot encoding | Column-set decision is conditioned on test categories | `OneHotEncoder(handle_unknown="ignore")` — refit per CV fold |
+| Numeric median imputation | Imputed value is a corpus aggregate | `SimpleImputer(strategy="median")` — refit per CV fold |
 
 What stays in `build_features` is row-local: the T₀ filter is per-trial,
 patent-event aggregation is within a single patent's own history,
 calendar and digit-slice transforms touch only one cell at a time. None
-of those leak — even computing them over the full corpus produces the
-same value at row *i* you'd get from a per-fold refit.
+of those leak — computing them over the full corpus produces the same
+value at row *i* as any per-fold recomputation would.
 
 The label column (`cancelled`) is **not** in `features.csv`; it lives
 alongside in `joined_trials.parquet` and is attached back at training
