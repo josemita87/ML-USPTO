@@ -25,7 +25,7 @@ model:
   cv_folds: 5
   mature_days: 600
   experiment_today: "2026-05-05"
-  # Frozen at the value used to produce final_submission/report.pdf so that
+  # Frozen at the value used to produce jupyter-submission/report.pdf so that
   # `drivers/run_train.py` reruns reproduce the reported held-out tail (1,907
   # rows, 433 positives). Earlier runs derived this from
   # `experiment_today - mature_days - 600`; the report pinned it explicitly
