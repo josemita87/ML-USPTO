@@ -23,40 +23,99 @@ from ml_uspto.models.schemas.constants import (
 
 
 class FrequencyEncoder(BaseEstimator, TransformerMixin):
-    """Per-column frequency encoding fit on training rows only.
+    """Per-column rolling frequency encoding, gated by T₀.
 
     Used for open-vocabulary party identifiers
-    (`petitioner_real_party`, `owner_real_party`). Counts are corpus
-    aggregates, so they must be refit per CV fold to avoid leakage.
-    Categories absent from training (including NaN if it was not
-    observed in train) map to 0.
+    (`petitioner_real_party`, `owner_real_party`). For a row at T₀ and
+    column `c` with value `v`, returns the count of *training* rows
+    where column `c` equals `v` and whose `date_column` is strictly
+    before T₀. Unseen values, NaN, and values whose every training
+    occurrence is ≥ T₀ all map to 0.
+
+    The date gate keeps the count consistent with project T₀
+    discipline: a row dated 2017 cannot see a 2020 filing the same
+    party will eventually make. Refit per CV fold via sklearn
+    `cross_validate` semantics.
     """
 
+    def __init__(self, date_column: str = "petition_filing_date") -> None:
+        """Stash the T₀-column name; no state until `fit`.
+
+        sklearn's `clone()` requires constructor args be retrievable as
+        same-named attributes.
+        """
+        self.date_column = date_column
+
     def fit(self, X: pd.DataFrame, y: object | None = None) -> "FrequencyEncoder":
-        """Learn `value_counts(dropna=False)` per column from `X`."""
+        """Index per-(column, value) sorted train dates for rolling lookup."""
         X = self._as_frame(X)
-        self.feature_names_in_ = np.asarray(X.columns, dtype=object)
-        self.counts_: dict[str, dict[object, int]] = {
-            col: X[col].value_counts(dropna=False).to_dict() for col in X.columns
-        }
+        # Pull t0 date out of the frame
+        dates = pd.to_datetime(X[self.date_column], errors="coerce").to_numpy()
+        valid = ~pd.isna(dates)
+        dates = dates[valid]
+        order = np.argsort(dates, kind="stable")
+        dates_sorted = dates[order]
+
+        feature_cols = [c for c in X.columns if c != self.date_column]
+        self.feature_names_in_ = np.asarray(feature_cols, dtype=object)
+
+        self.group_dates_: dict[str, dict[object, np.ndarray]] = {}
+        for col in feature_cols:
+            # Apply the same valid-mask + date-sort permutation used on
+            # `dates`, so vals_sorted[i] is the column value of the row at
+            # dates_sorted[i] — walking it = walking train rows in
+            # chronological order.
+            vals_sorted = X[col].to_numpy()[valid][order]
+            # Bucket positions by value. Python loop (not pandas groupby)
+            # because keys can be arbitrary objects (NaN, occasional
+            # tuples) that don't broadcast cleanly under numpy/pandas
+            # vectorization. Because we iterate in date order, each list
+            # comes out already date-sorted — exactly the precondition
+            # `np.searchsorted` needs at transform time.
+            idx_by_val: dict[object, list[int]] = {}
+            for i, v in enumerate(vals_sorted):
+                idx_by_val.setdefault(v, []).append(i)
+            self.group_dates_[col] = {
+                v: dates_sorted[np.asarray(idxs)] for v, idxs in idx_by_val.items()
+            }
         return self
 
     def transform(self, X: pd.DataFrame) -> np.ndarray:
-        """Map each value to its train-time count; unseen categories → 0."""
+        """Per row: count of pre-T₀ train occurrences of its (col, value)."""
         X = self._as_frame(X)
+        q_dates = pd.to_datetime(X[self.date_column], errors="coerce").to_numpy()
+        # NaT queries would otherwise sort as the max value under
+        # `searchsorted` and silently return the full training count
+        # — i.e. leak everything. Track the mask, force the search to
+        # return 0 for those rows by zeroing the output at the end.
+        nat_mask = pd.isna(q_dates)
         out = np.zeros((len(X), len(self.feature_names_in_)), dtype=np.int64)
+
         for j, col in enumerate(self.feature_names_in_):
-            counts = self.counts_.get(col, {})
-            out[:, j] = X[col].map(counts).fillna(0).astype(np.int64).to_numpy()
+            per_val = self.group_dates_.get(col, {})
+            col_vals = X[col].to_numpy()
+            rows_by_val: dict[object, list[int]] = {}
+            for i, v in enumerate(col_vals):
+                rows_by_val.setdefault(v, []).append(i)
+            for v, row_idxs in rows_by_val.items():
+                train_dates = per_val.get(v)
+                if train_dates is None:
+                    continue
+                row_idxs_arr = np.asarray(row_idxs)
+                idx = np.searchsorted(train_dates, q_dates[row_idxs_arr], side="left")
+                out[row_idxs_arr, j] = idx
+        if nat_mask.any():
+            out[nat_mask, :] = 0
         return out
 
     def get_feature_names_out(
         self, input_features: list[str] | None = None
     ) -> np.ndarray:
-        """Return `<col>_frequency` for each input column."""
-        names = (
-            list(input_features) if input_features is not None else list(self.feature_names_in_)
-        )
+        """Return `<col>_frequency` for each non-date input column."""
+        if input_features is not None:
+            names = [c for c in input_features if c != self.date_column]
+        else:
+            names = list(self.feature_names_in_)
         return np.asarray([f"{n}_frequency" for n in names], dtype=object)
 
     @staticmethod
@@ -188,6 +247,11 @@ class PriorEncoder(BaseEstimator, TransformerMixin):
         dates = pd.to_datetime(X[self.date_column], errors="coerce").to_numpy()
         keys = self._build_keys(X)
 
+        # NaT queries would sort as max under `searchsorted` and silently
+        # pull in the full training history. Mask them out and assign the
+        # global unconditional fallback at the end (count stays 0).
+        nat_mask = pd.isna(dates)
+
         out_rate = np.full(len(X), np.nan, dtype=np.float64)
         out_count = np.zeros(len(X), dtype=np.int64)
 
@@ -228,12 +292,21 @@ class PriorEncoder(BaseEstimator, TransformerMixin):
             )
             out_rate[nan_mask] = rate_fb
 
+        # Override anything `searchsorted` produced for NaT queries: a
+        # row with no T₀ can't be gated, so it gets the unconditional
+        # fallback rate and count 0 — never the leak-prone full-history
+        # tail searchsorted would have returned.
+        if nat_mask.any():
+            out_rate[nat_mask] = self.global_rate_
+            out_count[nat_mask] = 0
+
         return np.column_stack([out_rate, out_count.astype(np.float64)])
 
     def get_feature_names_out(
         self, input_features: list[str] | None = None
     ) -> np.ndarray:
         """`<group_label>_prior_rate`, `<group_label>_prior_count`."""
+        del input_features  # names are derived from `group_columns`, not the input slice
         return np.asarray(
             [
                 f"{self.feature_label_}_prior_rate",
@@ -243,11 +316,19 @@ class PriorEncoder(BaseEstimator, TransformerMixin):
         )
 
     def _build_keys(self, X: pd.DataFrame) -> np.ndarray:
-        """Concatenate the group columns into a single hashable key per row."""
+        """Concatenate the group columns into a single hashable key per row.
+
+        For composite keys, NaN components are coerced to a sentinel
+        string before tupling. Reason: tuple equality compares elements
+        via `==`, and `nan == nan` is False — two `(nan, "X")` tuples
+        built from different NaN objects can fail to hash/compare equal,
+        scattering rows that should bucket together. Sentinel-fill makes
+        NaN groups behave like any other named group.
+        """
         cols = list(self.group_columns)
         if len(cols) == 1:
             return X[cols[0]].astype(object).to_numpy()
-        return X[cols].astype(object).agg(tuple, axis=1).to_numpy()
+        return X[cols].astype(object).fillna("__NA__").agg(tuple, axis=1).to_numpy()
 
     @staticmethod
     def _as_frame(X: object) -> pd.DataFrame:
@@ -313,8 +394,8 @@ def build_preprocessor() -> ColumnTransformer:
             *prior_branches,
             (
                 "freq",
-                FrequencyEncoder(),
-                list(FREQUENCY_CATEGORICAL_COLUMNS),
+                FrequencyEncoder(date_column=PRIOR_DATE_COLUMN),
+                [*FREQUENCY_CATEGORICAL_COLUMNS, PRIOR_DATE_COLUMN],
             ),
             (
                 "ohe",

@@ -61,15 +61,38 @@ def _frame(
     )
 
 
-def test_frequency_encoder_fits_on_train_only():
-    """Counts come from the train fit; unseen test categories map to 0."""
-    train = pd.DataFrame({"petitioner_real_party": ["A", "A", "A", "B"]})
-    test = pd.DataFrame({"petitioner_real_party": ["A", "B", "C"]})
+def test_frequency_encoder_rolling_count_gated_by_t0():
+    """Counts roll forward by T₀: train occurrences ≥ T₀ are excluded.
+
+    Mirrors `PriorEncoder` semantics — the count for `(col=val)` at a
+    test row's T₀ is the number of train rows with that value whose
+    `date_column` is strictly before T₀. Unseen values map to 0.
+    """
+    train = pd.DataFrame(
+        {
+            "petitioner_real_party": ["A", "A", "A", "B"],
+            "petition_filing_date": pd.to_datetime(
+                ["2019-01-01", "2020-01-01", "2021-01-01", "2019-06-01"]
+            ),
+        }
+    )
+    test = pd.DataFrame(
+        {
+            "petitioner_real_party": ["A", "A", "B", "C"],
+            "petition_filing_date": pd.to_datetime(
+                ["2020-06-01", "2022-01-01", "2020-01-01", "2022-01-01"]
+            ),
+        }
+    )
 
     enc = FrequencyEncoder().fit(train)
     out = enc.transform(test)
 
-    assert out.tolist() == [[3], [1], [0]]
+    # A before 2020-06-01 → 2 (2019-01-01, 2020-01-01)
+    # A before 2022-01-01 → 3 (all three)
+    # B before 2020-01-01 → 1 (2019-06-01)
+    # C unseen → 0
+    assert out.tolist() == [[2], [3], [1], [0]]
 
 
 def test_preprocessor_one_hot_freezes_columns_at_fit():
